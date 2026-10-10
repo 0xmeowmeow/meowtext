@@ -32,6 +32,7 @@ from meowtext.grid import Cell, Color, Grid
 from meowtext.integration import kitty_session
 from meowtext.project import Project, save_project
 from meowtext.studio import MeowText
+from meowtext.choices import Choices
 
 
 class LibraryTests(unittest.TestCase):
@@ -169,28 +170,20 @@ class LibraryTests(unittest.TestCase):
 
 
 class DiscoveryTests(unittest.TestCase):
-    def test_narrowing_is_reversible_and_every_font_is_reachable(self):
+    def test_exploration_keeps_full_rounds_and_back_restores_exact_choices(self):
         items = starter_index()
-        start = Discovery(items, count=3)
-        original = [i.font.id for i in start.pool]
-        visited = set()
-
-        def traverse(pool):
-            d = Discovery(pool, count=3)
-            visited.update(i.font.id for i in d.choices)
-            if len(pool) <= 3:
-                return
-            for i in range(len(d.choices)):
-                sub = Discovery(pool, count=3)
-                sub.narrow(i)
-                self.assertLess(len(sub.pool), len(pool))
-                traverse(sub.pool)
-
-        traverse(items)
-        self.assertEqual(visited, set(original))
-        start.narrow(0)
-        start.back()
-        self.assertEqual([i.font.id for i in start.pool], original)
+        start = Discovery(items, count=6)
+        original = [i.font.id for i in start.choices]
+        for step in range(12):
+            start.narrow(step % 6)
+            self.assertEqual(len(start.choices), 6)
+            self.assertEqual(len({i.font.id for i in start.choices}), 6)
+            self.assertEqual(
+                {i.font.id for i in start.scope}, {i.font.id for i in items}
+            )
+        for step in range(12):
+            start.back()
+        self.assertEqual([i.font.id for i in start.choices], original)
         start.reset(query="no-such-font")
         self.assertEqual(start.choices, [])
 
@@ -215,7 +208,8 @@ class StudioTests(unittest.TestCase):
                 initial = len(app.discovery.pool)
                 await pilot.click("#like-0")
                 await pilot.pause()
-                self.assertLess(len(app.discovery.pool), initial)
+                self.assertEqual(len(app.discovery.history), 1)
+                self.assertEqual(len(app.discovery.choices), app.discovery.count)
                 await pilot.click("#font-back")
                 await pilot.pause()
                 self.assertEqual(len(app.discovery.pool), initial)
@@ -228,11 +222,11 @@ class StudioTests(unittest.TestCase):
                 await pilot.pause()
                 self.assertTrue(app.query_one("#solid-field").display)
                 self.assertFalse(app.query_one("#gradient-settings").display)
-                app.query_one("#fill", Select).value = "gradient"
+                app.query_one("#fill", Choices).value = "gradient"
                 await pilot.pause()
                 self.assertTrue(app.query_one("#gradient-settings").display)
                 self.assertFalse(app.query_one("#solid-field").display)
-                app.query_one("#outline", Checkbox).value = True
+                app.query_one("#outline-mode", Choices).value = "shade"
                 await pilot.pause()
                 self.assertTrue(app.query_one("#outline-settings").display)
                 app.action_save_tab()
@@ -371,14 +365,14 @@ class RestoredWorkflowTests(unittest.TestCase):
                 self.assertTrue(app.query_one("#trace-settings").display)
                 self.assertFalse(app.query_one("#motion-layers-field").display)
                 app.set_focus(None)
-                app.query_one("#decoration-tabs").active = "outline-pane"
+                app._tune_bank("outline")
                 await pilot.pause(0.2)
-                control = app.query_one("#outline-mode", Select)
+                control = app.query_one("#outline-mode", Choices)
                 self.assertGreaterEqual(
                     control.parent.region.bottom, control.region.bottom
                 )
                 await pilot.click("#outline-mode")
-                await pilot.press("home", "enter")
+                await pilot.press("home", "right")
                 await pilot.pause()
                 self.assertEqual(app.project.style.outline_mode, "shade")
                 for key, value in [
@@ -390,7 +384,7 @@ class RestoredWorkflowTests(unittest.TestCase):
                     ("motion-layers", "letters"),
                     ("motion-travel", "180"),
                 ]:
-                    app.query_one("#" + key, Select).value = value
+                    app.query_one("#" + key, Choices).value = value
                     await pilot.pause()
                 app.playing = False
                 self.assertTrue(app.query_one("#motion-layers-field").display)

@@ -1,4 +1,4 @@
-"""Local, measured font discovery. Each choice narrows a reversible search tree."""
+"""Local font discovery: soft neighbourhoods with room to explore."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -15,7 +16,17 @@ from meowtext.catalog import FontInfo, group_fonts, list_fonts, render
 from meowtext.errors import RenderError
 from meowtext.grid import Grid, is_ink
 
-CATEGORIES = ("All", "Thin lines", "Compact", "Big blocks", "Outline", "ANSI colour")
+CATEGORIES = (
+    "All",
+    "Gothic",
+    "Script",
+    "Slanted",
+    "Thin lines",
+    "Compact",
+    "Big blocks",
+    "Outline",
+    "ANSI colour",
+)
 SAMPLE = "MEOW"
 _INDEX_LOCK = threading.Lock()
 
@@ -30,6 +41,28 @@ class Specimen:
     font: FontInfo
     features: tuple[float, ...]
     categories: tuple[str, ...]
+
+    @property
+    def description(self) -> str:
+        """Human vocabulary supplements the measured silhouette, never replaces it."""
+        labels = [c for c in self.categories if c != "All"]
+        labels = ["Gothic / blackletter" if c == "Gothic" else c for c in labels]
+        height = round(2 ** (self.features[1] * 4) - 1)
+        size = "tall" if height >= 10 else "small" if height <= 4 else "medium"
+        weight = "open strokes" if self.features[2] < 0.7 else "dense strokes"
+        return " · ".join([*labels[:2], size, weight, self.font.engine.upper()])
+
+
+def named_categories(font: FontInfo) -> tuple[str, ...]:
+    name = re.sub(r"[_-]+", " ", font.name.casefold())
+    categories = []
+    if re.search(r"goth|fraktur|black\s*letter|old\s*eng|medieval|cloister", name):
+        categories.append("Gothic")
+    if re.search(r"script|cursiv|handwrit|calligraph", name):
+        categories.append("Script")
+    if re.search(r"slant|italic|lean|speed", name):
+        categories.append("Slanted")
+    return tuple(categories)
 
 
 def describe(grid: Grid, font: FontInfo) -> Specimen:
@@ -55,7 +88,7 @@ def describe(grid: Grid, font: FontInfo) -> Specimen:
     )
     density = count / (width * height)
     colour = float(font.kind == "color")
-    cats = ["All"]
+    cats = ["All", *named_categories(font)]
     if lines > 0.60 and blocks < 0.1:
         cats.append("Thin lines")
     if height <= 5 and width <= 34:
@@ -124,7 +157,11 @@ def build_index(
                 result = Specimen(
                     font,
                     tuple(float(x) for x in item["features"]),
-                    tuple(item["categories"]),
+                    tuple(
+                        dict.fromkeys(
+                            ("All", *named_categories(font), *item["categories"])
+                        )
+                    ),
                 )
             else:
                 result = describe(render(font, SAMPLE).grid, font)
@@ -179,6 +216,11 @@ def starter_index() -> list[Specimen]:
         ("figlet", "standard"),
         ("figlet", "Digital"),
         ("figlet", "Lean"),
+        ("figlet", "Gothic"),
+        ("figlet", "Script"),
+        ("figlet", "Mini"),
+        ("figlet", "Bubble"),
+        ("figlet", "Shadow"),
     ]:
         try:
             font = resolve(engine, name)
@@ -191,7 +233,53 @@ def starter_index() -> list[Specimen]:
 
 
 def distance(a: Specimen, b: Specimen) -> float:
-    return sum((x - y) ** 2 for x, y in zip(a.features, b.features))
+    measured = sum((x - y) ** 2 for x, y in zip(a.features, b.features))
+    named_a, named_b = set(named_categories(a.font)), set(named_categories(b.font))
+    # A recognisable family name is useful evidence when silhouettes disagree.
+    if named_a and named_b and named_a.isdisjoint(named_b):
+        measured += 1.0
+    elif bool(named_a) != bool(named_b):
+        measured += 0.7
+    return measured
+
+
+def shape_key(item: Specimen):
+    """Keep copies and colour variants from occupying a comparison round.
+
+    The catalogue still contains every font. Only the comparison treats equal
+    measured shapes as one candidate; ANSI colour alone is not a new shape.
+    """
+    return tuple(
+        round(value, 8) for index, value in enumerate(item.features) if index != 5
+    )
+
+
+def distinct_shapes(items, exclude=()):
+    seen = {shape_key(item) for item in exclude}
+    names = {}
+    for item in exclude:
+        names.setdefault(item.font.name.casefold().strip(), []).append(item)
+    result = []
+    for item in items:
+        key = shape_key(item)
+        name = item.font.name.casefold().strip()
+        # Copies ported between FIGlet and TheDraw can differ slightly in
+        # spacing. Keep them accessible in Browse all, but avoid showing three
+        # effectively identical Frakturs in a nine-font comparison.
+        similar = any(
+            sum(
+                (a - b) ** 2
+                for index, (a, b) in enumerate(zip(item.features, other.features))
+                if index != 5
+            )
+            < 0.08
+            for other in names.get(name, ())
+        )
+        if key not in seen and not similar:
+            seen.add(key)
+            names.setdefault(name, []).append(item)
+            result.append(item)
+    return result
 
 
 def representatives(
@@ -200,6 +288,7 @@ def representatives(
     """Farthest-first selection avoids a page of near-identical font names."""
     if not items or count <= 0:
         return []
+    items = distinct_shapes(items)
     chosen = [items[offset % len(items)]]
     remaining = [item for item in items if item != chosen[0]]
     nearest = {item.font.id: distance(item, chosen[0]) for item in remaining}
@@ -216,50 +305,169 @@ class Discovery:
     def __init__(self, items: list[Specimen], count: int = 6):
         self.all = items
         self.pool = items[:]
+        self.scope = items[:]
         self.count = count
-        self.history: list[list[Specimen]] = []
+        self.history = []
+        self.seed = None
         self.offset = 0
-        self.choices = representatives(self.pool, count)
+        self.explorers = set()
+        self.choices = []
+        self._choose()
 
-    def reset(
-        self, category: str = "All", query: str = "", favourites: set[str] | None = None
-    ) -> None:
-        self.pool = [
-            item
-            for item in self.all
-            if category in item.categories
-            and query.casefold()
-            in f"{item.font.name} {Path(item.font.source).name}".casefold()
-            and (favourites is None or font_key(item.font) in favourites)
-        ]
+    def reset(self, category="All", query="", favourites=None) -> None:
+        terms = query.casefold().split()
+
+        def matches(item):
+            names = " ".join(
+                (item.font.name, Path(item.font.source).name, item.description)
+            )
+            if "Gothic" in item.categories:
+                names += " fraktur medieval old english blackletter black letter"
+            return (
+                category in item.categories
+                and all(term in names.casefold() for term in terms)
+                and (favourites is None or font_key(item.font) in favourites)
+            )
+
+        self.scope = [item for item in self.all if matches(item)]
+        self.pool = self.scope[:]
         self.history.clear()
+        self.seed = None
         self.offset = 0
-        self.choices = representatives(self.pool, self.count)
+        self._choose()
+
+    def _choose(self):
+        self.explorers = set()
+        if not self.pool:
+            self.choices = []
+            return
+        if self.seed is None:
+            # Include familiar directions on the first page. Farthest-first
+            # alone tended to spend every slot on an eccentric visual outlier.
+            chosen = []
+            if not self.offset:
+                for category, familiar in (
+                    ("Big blocks", "ANSI Shadow"),
+                    ("Gothic", "FB-Gothic Cy"),
+                    ("Thin lines", "future"),
+                    ("ANSI colour", ""),
+                    ("Script", "Script"),
+                    ("Compact", "pagga"),
+                ):
+                    candidates = [
+                        i
+                        for i in distinct_shapes(self.pool, chosen)
+                        if category in i.categories
+                    ]
+                    if candidates and len(chosen) < self.count:
+                        chosen.append(
+                            min(
+                                candidates,
+                                key=lambda i: (
+                                    i.font.name != familiar,
+                                    abs(i.features[1] - 0.75)
+                                    + abs(i.features[0] - 0.8),
+                                    len(i.font.name),
+                                    i.font.name,
+                                ),
+                            )
+                        )
+            for item in representatives(
+                distinct_shapes(self.pool, chosen), self.count, self.offset
+            ):
+                if item not in chosen:
+                    chosen.append(item)
+                if len(chosen) == self.count:
+                    break
+        else:
+            # Four close shapes plus two escape routes at the default six.
+            # Search the original scope every time, so one click never deletes
+            # a branch of the catalogue. The user chooses when they are done.
+            close_count = max(2, self.count - max(1, self.count // 3))
+            near = distinct_shapes(self.pool, [self.seed])
+            start = self.offset % max(1, len(near))
+            near = near[start:] + near[:start]
+            chosen = [self.seed]
+            window = near[: max(close_count * 4, 12)]
+            for item in representatives(window, close_count - 1):
+                if item not in chosen:
+                    chosen.append(item)
+            outside = distinct_shapes(
+                [i for i in self.scope if i not in self.pool], chosen
+            )
+            if not outside:
+                outside = distinct_shapes(
+                    [i for i in self.all if i not in self.pool], chosen
+                )
+            if outside:
+                ordered = sorted(
+                    outside, key=lambda i: distance(i, self.seed), reverse=True
+                )
+                # Rotate the exploratory candidates too, rather than repeating
+                # the same extreme outlier on every page.
+                start = self.offset % len(ordered)
+                outside = ordered[start:] + ordered[:start]
+                for item in representatives(outside, self.count - len(chosen)):
+                    chosen.append(item)
+                    self.explorers.add(item.font.id)
+        # Small result sets remain useful: fill spare places with clearly
+        # labelled nearby and far-away alternatives. Favourites/list mode uses
+        # the unpadded pool directly, so it never invents saved favourites.
+        if len(chosen) < self.count:
+            remaining = distinct_shapes(self.all, chosen)
+            if remaining:
+                anchor = self.seed or chosen[0]
+                remaining.sort(key=lambda i: distance(i, anchor))
+                for item in representatives(
+                    remaining, self.count - len(chosen), self.offset
+                ):
+                    chosen.append(item)
+                    self.explorers.add(item.font.id)
+        self.choices = chosen[: self.count]
 
     def narrow(self, index: int) -> None:
         seed = self.choices[index]
-        self.history.append(self.pool[:])
-        # Keep each representative in its own group even when silhouettes match.
-        choice_ids = {item.font.id for item in self.choices}
-        group = [
-            item
-            for item in self.pool
-            if item.font.id not in choice_ids
-            and min(
-                range(len(self.choices)), key=lambda i: distance(item, self.choices[i])
+        self.history.append(
+            (
+                self.pool[:],
+                self.scope[:],
+                self.choices[:],
+                self.seed,
+                self.offset,
+                self.explorers.copy(),
             )
-            == index
-        ]
-        self.pool = [seed, *sorted(group, key=lambda item: distance(item, seed))]
+        )
+        # Following a wildcard explicitly broadens the search again.
+        if seed not in self.scope:
+            self.scope = self.all[:]
+        previous = self.seed
+        self.seed = seed
+        ranked = sorted(
+            self.scope,
+            key=lambda item: distance(item, seed)
+            + (0.15 * distance(item, previous) if previous else 0),
+        )
+        size = min(len(ranked), max(self.count * 6, int(len(self.pool) * 0.55)))
+        self.pool = [seed, *[i for i in ranked if i != seed]][:size]
         self.offset = 0
-        self.choices = representatives(self.pool, self.count)
+        self._choose()
 
     def back(self) -> None:
         if self.history:
-            self.pool = self.history.pop()
-        self.offset = 0
-        self.choices = representatives(self.pool, self.count)
+            (
+                self.pool,
+                self.scope,
+                self.choices,
+                self.seed,
+                self.offset,
+                self.explorers,
+            ) = self.history.pop()
 
     def more(self) -> None:
-        self.offset = (self.offset + self.count) % max(1, len(self.pool))
-        self.choices = representatives(self.pool, self.count, self.offset)
+        self.offset += self.count
+        self._choose()
+
+    def resize(self, count):
+        if count != self.count:
+            self.count = count
+            self._choose()

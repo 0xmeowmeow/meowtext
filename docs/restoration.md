@@ -1,16 +1,16 @@
 # What the rebuild preserves
 
-The 1.0 editor changes navigation and adds saved-design integration. It reuses the accumulated font and effect engines.
+The 1.1 editor uses visual inventories and comparison-first navigation, with saved-design integration. It reuses the accumulated font and effect engines.
 
 | Existing work | Where it lives now |
 | --- | --- |
 | FIGlet, TOIlet and TheDraw glyph rendering | Original `engines/` and `catalog.py` |
-| All six outline modes, per-letter geometry, sides, placement and offsets | Original `effects.py`, exposed in Decorate → Outline |
-| Independent lettering and outline gradients, bands and speed | Decorate → Fill / Outline / Motion |
+| All six outline modes, per-letter geometry, sides, placement and offsets | Original `effects.py`, exposed in Decorate → Edges → Enter |
+| Independent lettering and outline gradients, bands and speed | Decorate → Looks / Edges / Motion → Enter |
 | Hue, march, pulse, sparkle, scan and trace | Original `compose.present` and `effects.py`, shared by the editor and `watch` |
 | All trace paths and reveal behaviours | Decorate → Motion |
-| Colour roles, linked colour rotation, independent HSV edits, splitting and focus | Original `palette.py`, exposed in Decorate → Colour roles |
-| Cell patches and replacement letter glyphs | Original grid/project/layout representation, exposed through Paint in Fill |
+| Colour roles, linked colour rotation, independent HSV edits, splitting and focus | Original `palette.py`, exposed in Decorate → Looks → Enter |
+| Cell patches and replacement letter glyphs | Original grid/project/layout representation, exposed through Paint in Looks → Enter |
 | Custom palettes, presets, symbols, saved favourites and notes | Loaded from the existing configuration directory |
 | Original editing interface | `meowtext legacy` |
 | Experimental instruments, phosphor panels and readouts | Source retained; separate modules outside the main banner workflow |

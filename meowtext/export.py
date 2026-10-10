@@ -64,6 +64,7 @@ def to_plain(grid: Grid) -> str:
 def to_markdown(grid: Grid) -> str:
     text = to_plain(grid)
     import re
+
     length = max([2] + [len(m.group()) for m in re.finditer(r"`+", text)]) + 1
     fence = "`" * length
     return f"{fence}text\n{text}{fence}\n"
@@ -78,10 +79,18 @@ def to_ansi(grid: Grid) -> str:
         for cell in row:
             codes: list[str] = []
             if cell.fg != last_fg:
-                codes.append("39" if cell.fg is None else f"38;2;{cell.fg.r};{cell.fg.g};{cell.fg.b}")
+                codes.append(
+                    "39"
+                    if cell.fg is None
+                    else f"38;2;{cell.fg.r};{cell.fg.g};{cell.fg.b}"
+                )
                 last_fg = cell.fg
             if cell.bg != last_bg:
-                codes.append("49" if cell.bg is None else f"48;2;{cell.bg.r};{cell.bg.g};{cell.bg.b}")
+                codes.append(
+                    "49"
+                    if cell.bg is None
+                    else f"48;2;{cell.bg.r};{cell.bg.g};{cell.bg.b}"
+                )
                 last_bg = cell.bg
             if codes:
                 parts.append("\x1b[" + ";".join(codes) + "m")
@@ -111,7 +120,7 @@ def to_html(grid: Grid) -> str:
         "<!DOCTYPE html>\n"
         '<meta charset="utf-8">\n'
         "<title>meowtext</title>\n"
-        "<pre style=\"margin:0;background:#000;color:#eee;line-height:1.05;"
+        '<pre style="margin:0;background:#000;color:#eee;line-height:1.05;'
         "font-family:'DejaVu Sans Mono',ui-monospace,monospace\">"
         f"{picture}</pre>\n"
     )
@@ -135,7 +144,12 @@ def to_json(grid: Grid) -> str:
                 item["bg_slot"] = cell.bg_slot
             encoded.append(item)
         cells.append(encoded)
-    document: dict = {"meowtext": 1, "width": grid.width, "height": grid.height, "cells": cells}
+    document: dict = {
+        "meowtext": 1,
+        "width": grid.width,
+        "height": grid.height,
+        "cells": cells,
+    }
     palette = grid.palette if isinstance(grid.palette, RelationPalette) else None
     if palette is not None and (palette.roles or palette.hue):
         document["hue"] = palette.hue
@@ -228,36 +242,9 @@ def to_irc(grid: Grid) -> str:
 
 
 def to_png(grid: Grid, font_size: int = 18) -> bytes:
-    try:
-        from PIL import Image, ImageDraw, ImageFont
-    except ImportError as exc:
-        raise RenderError("PNG export needs Pillow") from exc
+    from meowtext.raster import rasterize
 
-    try:
-        font = ImageFont.truetype(_MONO_FONT, font_size)
-    except OSError as exc:
-        raise RenderError(f"could not load {_MONO_FONT}") from exc
-
-    cell_w = max(1, int(round(font.getlength("M"))))
-    ascent, descent = font.getmetrics()
-    cell_h = max(1, ascent + descent)
-    width = max(1, grid.width * cell_w)
-    height = max(1, grid.height * cell_h)
-    image = Image.new("RGB", (width, height), (0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    for y, row in enumerate(grid.rows):
-        for x, cell in enumerate(row):
-            if is_empty(cell):
-                continue
-            left, top = x * cell_w, y * cell_h
-            if cell.bg is not None:
-                draw.rectangle(
-                    (left, top, left + cell_w - 1, top + cell_h - 1),
-                    fill=(cell.bg.r, cell.bg.g, cell.bg.b),
-                )
-            if cell.char not in ("", " "):
-                fill = (cell.fg.r, cell.fg.g, cell.fg.b) if cell.fg else (230, 230, 230)
-                draw.text((left, top), cell.char, font=font, fill=fill)
+    image = rasterize(grid, font_size)
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()

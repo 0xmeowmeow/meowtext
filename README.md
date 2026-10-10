@@ -30,14 +30,18 @@ The installer creates an isolated Python environment and a launcher. It does not
 
 ## Make something
 
-1. **Fonts:** type your words and compare six rendered choices. **More like this** narrows the selection; **Back** undoes that step. Categories, search, **Browse all**, and starred favourites are available too.
-2. **Use font → Decorate:** the full banner stays above the controls. Fill, Outline, Colour roles, Shadow and Motion each have their own panel. Controls appear when their effect is enabled.
-3. **Presets:** compare 28 ready-made looks using your selected words and font, then adjust any detail.
+1. **Fonts:** compare six rendered choices, or nine in a large window. Arrows move between tiles, **Enter** explores similar shapes, **Space** uses the font, and **F** stars a favourite. Every round includes different directions to explore. Search understands words such as gothic, blackletter, script and thin. **I** inspects the focused font at full size.
+2. **Use font → Decorate:** your banner stays above three visual inventories: **Looks**, **Edges** and **Motion**. Each item shows its actual effect. **Tab** switches panels; **arrows** apply a choice immediately. Motion specimens animate. The active panel and item have bright, unmistakable highlights.
+3. **Tune:** press **Enter** in a panel to reveal the detailed settings. These also preview immediately; **Escape** returns to the inventory. Solid fills hide gradient controls, disabled borders hide border settings, and each animation shows its relevant controls. Colour roles and painting live in Looks; shadows live in Edges. **Ctrl+Z** undoes an effect change.
 4. **Save & use:** the name comes from your words. Changing the name updates the export filename. A custom name or path stays yours. Save, choose where the banner should appear, and press **Copy command**.
 
-`Ctrl+T` edits the words, `Ctrl+F` returns to fonts, `Ctrl+P` inspects at actual cell size, `Ctrl+S` opens Save & use, and `Ctrl+Q` quits. F1–F4 switch sections. Mouse and Tab navigation both work. Small windows scroll; no window dimensions are forced.
+`Ctrl+T` edits the words, `Ctrl+F` returns to fonts, `Ctrl+P` inspects at actual cell size, `Ctrl+S` opens Save & use, and `Ctrl+Q` quits. F1–F4 switch sections; F2 compares 28 ready-made looks using your words and font. **Alt+1/2/3** jumps to a decoration panel. **F5** freezes the animated interface specimens and logo. Mouse clicks work too. Small windows scroll to keep the selected item visible; no window dimensions or terminal font sizes are forced.
 
-Font discovery measures shape, weight, size and colour locally. Its first screen appears immediately while the full catalogue is indexed, then cached. The number of fonts depends on what you have installed; thousands are supported. Narrowing is reversible and does not promise an exact four-click result for every font.
+Font discovery measures shape, weight, size and colour locally, supplemented by familiar font-family names. Its first screen appears immediately while the full catalogue is indexed, then cached. Exploring keeps close alternatives and labelled wildcards, with copies and colour variants grouped out of the comparison. **Browse all** retains every catalogue entry. **Back** restores the previous round exactly. The number of fonts depends on what you have installed; thousands are supported. Discovery helps you explore rather than guaranteeing a particular font in four clicks.
+
+Font previews use native terminal cells whenever they fit. Larger designs are fitted proportionally with Kitty graphics; full-size inspection is always available. PNG export draws block characters as exact cell fractions, so neighbouring cells do not erase or double their strokes.
+
+![Meowtext font comparisons in Kitty](docs/images/fonts.png)
 
 ## Use your designs
 

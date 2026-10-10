@@ -6,12 +6,8 @@ import copy
 import os
 import re
 import shlex
-import sys
-from io import BytesIO
 from pathlib import Path
 
-from PIL import Image
-from rich.style import Style
 from rich.text import Text
 from textual import work, on
 from textual.worker import get_current_worker
@@ -39,6 +35,8 @@ from textual.widgets import (
 )
 
 from meowtext import library
+from meowtext.choices import Choices
+from meowtext.inventory import Inventory, Lettering, Showcase, FontCard
 from meowtext.catalog import FontInfo, list_fonts, measure_spans, group_fonts
 from meowtext.compose import Banner, layout_font, present
 from meowtext.discovery import (
@@ -71,7 +69,7 @@ from meowtext.effects import (
     resolve_palette,
 )
 from meowtext.errors import MeowTextError, RenderError
-from meowtext.export import FORMATS, export, to_ansi, to_png
+from meowtext.export import FORMATS, export
 from meowtext.grid import Color, Grid
 from meowtext.palette import RelationPalette, used_slots, rgb_to_hsv
 from meowtext.packs import (
@@ -84,6 +82,7 @@ from meowtext.packs import (
 from meowtext.project import Project, save_project, load_project
 from meowtext.tui import to_rich, _dim
 from meowtext.previews import fit_preview
+from meowtext.raster import fit_image
 
 try:
     # Import before Textual owns input: the library queries terminal capabilities.
@@ -93,10 +92,15 @@ except ImportError:
 
 
 class Preview(Static):
+    DEFAULT_CSS = """
+    Preview { content-align: center middle; text-wrap: nowrap; overflow: hidden; align: center middle; }
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.grid = Grid()
         self._picture = None
+        self._shown = None
 
     def compose(self):
         if (
@@ -105,22 +109,36 @@ class Preview(Static):
             and os.environ.get("KITTY_WINDOW_ID")
         ):
             self._picture = TGPImage()
-            self._picture.styles.width = "auto"
-            self._picture.styles.height = "auto"
-            self._picture.styles.max_width = "100%"
-            self._picture.styles.max_height = "100%"
+            self._picture.display = False
             yield self._picture
 
     def show(self, grid: Grid) -> None:
         self.grid = grid
-        if self._picture is not None and grid.width and grid.height:
-            self.update("")
-            self._picture.image = Image.open(BytesIO(to_png(grid)))
+        width, height = self.content_size
+        if width < 1 or height < 1:
+            return
+        native = grid.width <= width and grid.height <= height
+        if self._picture is not None:
+            self._picture.display = not native and bool(grid.width and grid.height)
+        if native or self._picture is None or not grid.width or not grid.height:
+            if self._picture is not None and self._picture.image is not None:
+                self._picture.image = None
+            self.update(fit_preview(grid, width, height))
         else:
-            self.update(fit_preview(grid, self.size.width or 36, self.size.height or 7))
+            from textual_image._terminal import get_cell_size
+
+            picture, columns, rows = fit_image(grid, width, height, get_cell_size())
+            self.update("")
+            # Explicit placement fixes the auto-size feedback loop that clipped
+            # tall fonts and enlarged small ones. The image includes cell padding.
+            self._picture.styles.width = columns
+            self._picture.styles.height = rows
+            self._picture.image = picture
+        self._shown = (id(grid), width, height)
 
     def on_resize(self) -> None:
-        self.show(self.grid)
+        if self._shown != (id(self.grid), *self.content_size):
+            self.show(self.grid)
 
 
 class Inspect(ModalScreen):
@@ -149,9 +167,13 @@ class Inspect(ModalScreen):
     def close(self):
         self.dismiss()
 
+    def on_mount(self):
+        self.query_one("#inspect-scroll").focus()
+
 
 class MeowText(App):
     TITLE = "meowtext"
+    AUTO_FOCUS = "#font-tile-0"
     ENABLE_COMMAND_PALETTE = False
     CSS = """
     Screen { background: #090f17; color: #d9e4ec; }
@@ -191,6 +213,8 @@ class MeowText(App):
     Button:hover, Button:focus { background: #23424d; color: #7beaf0; }
     Button.-primary { background: #4aa5b3; color: #06151c; }
     Input, Select { border: tall #29404d; }
+    Input, SelectCurrent { background: #10212c; color: #d9e4ec; }
+    Input:focus, Select:focus SelectCurrent { background: #25414a; color: #e5f4f1; }
     #adjust-scroll, #save-scroll { height: 1fr; padding: 1; }
     #decoration-preview { height: 38%; min-height: 6; border-bottom: solid #29404d; padding: 0 1; }
     #decoration-meta { height: 1; color: #90a5b4; }
@@ -223,8 +247,68 @@ class MeowText(App):
     Screen.narrow .control-grid { grid-size: 1; }
     Screen.compact #message { display: none; }
     Screen.short #decoration-preview { height: 25%; min-height: 3; }
+    #decoration-preview { height: 30%; min-height: 4; max-height: 12; border: double #3fbdca; padding: 0 1; }
+    #decoration-meta { height: 1; color: #90a5b4; }
+    #decoration-panels { height: 1fr; }
+    .bank { width: 1fr; height: 1fr; padding: 0 1; border: solid #294653; }
+    .bank:focus-within { border: double #b4ef6b; }
+    .bank-title { color: #b4ef6b; text-style: bold; height: 1; margin: 0 0 1 0; }
+    .bank .control-grid { grid-size: 1; grid-rows: auto; grid-gutter: 0; height: auto; }
+    .bank .field { height: auto; margin: 0 0 1 0; }
+    .bank .field Label { color: #8faaba; }
+    .bank .field Choices { width: 100%; }
+    .bank Checkbox { margin: 0 0 1 0; }
+    .bank Button { height: 1; min-height: 1; border: none; padding: 0 1; margin: 0 0 1 0; width: 100%; }
+    .bank .help { height: auto; color: #8faaba; margin-top: 1; }
+    Screen.short .bank-title { margin: 0; }
+    Screen.short .bank .field { margin-bottom: 0; }
+    Screen.short #decoration-preview { height: 4; min-height: 3; }
+    #text-row { height: 3; padding: 0; background: #12242e; }
+    #text-row Label { width: 7; padding-left: 1; }
+    #text { border: heavy #28434e; background: #0b1922; }
+    #text:focus { border: heavy #b6ef6b; }
+    #message { width: 30%; }
+    #sidebar { display: none; }
+    #sections > ContentTabs { background: #172d38; }
+    Tab { color: #b5ccd6; text-style: bold; }
+    Tab.-active { background: #55d6e7; color: #08151b; }
+    .toolbar { height: 3; }
+    .toolbar Button { height: 1; border: none; margin-top: 1; }
+    #font-count { height: 1; }
+    #font-actions { height: 1; }
+    #font-actions Button { margin: 0; }
+    .tiles { grid-gutter: 0 1; }
+    .tile { padding: 0; border: solid #304858; background: #0e1c27; }
+    .tile:focus { border: heavy #bbf578; background: #213840; }
+    .tile:focus .tile-title { background: #b6ef6b; color: #06171e; text-style: bold; }
+    .tile.selected { border: double #65e8ed; }
+    .tile-title { background: #203542; color: #e2f3f4; text-style: bold; padding: 0 1; }
+    .tile-detail { height: 1; padding: 0 1; color: #a2b9c6; text-wrap: nowrap; }
+    #font-grid { grid-size: 2; }
+    Screen.wide #font-grid { grid-size: 3; }
+    .bank { height: 1fr; background: #101d28; padding: 0; border: solid #315363; }
+    .bank:focus-within { background: #1a3039; border: heavy #b6ef6b; }
+    .bank Lettering { background: #1d3341; }
+    .bank:focus-within Lettering { color: #b6ef6b; background: #28454a; }
+    .bank-readout { height: 1; padding: 0 1; color: #c6d9e0; background: #20343e; text-wrap: nowrap; }
+    .detail-scroll { height: 1fr; padding: 0 1; }
+    .detail-scroll .control-grid { grid-size: 1; grid-rows: auto; grid-gutter: 0; height: auto; }
+    .detail-scroll .field { height: auto; margin-bottom: 1; }
+    .detail-scroll Input, .detail-scroll Checkbox { height: 1; border: none; padding: 0; }
+    .bank .tune-button { height: 1; margin: 0; width: 100%; background: #28434e; color: #d4ebee; }
+    #decoration-preview { height: 26%; min-height: 5; max-height: 10; border: double #65e8ed; }
+    #decoration-meta { height: 1; background: #142e37; padding: 0 1; color: #c2dce4; }
+    Screen.short Lettering { height: 1; }
+    Screen.short #decoration-preview { height: 4; min-height: 4; }
+    Screen.narrow Showcase { display: none; }
+    Screen.narrow #font-grid { grid-size: 1; }
     """
     BINDINGS = [
+        Binding("f5", "ui_motion", "", show=False),
+        Binding("ctrl+z", "undo_effect", "Undo", show=False),
+        Binding("alt+1", "bank('fill')", "", show=False, priority=True),
+        Binding("alt+2", "bank('outline')", "", show=False, priority=True),
+        Binding("alt+3", "bank('motion')", "", show=False, priority=True),
         Binding("ctrl+q", "quit", "Quit"),
         Binding("ctrl+f", "fonts", "Fonts", priority=True),
         Binding("ctrl+t", "words", "Text", priority=True),
@@ -246,6 +330,7 @@ class MeowText(App):
             if project
             else Project(style=PRESETS["cyan"].clone())
         )
+        self._undo = []
         self._provided_index = index
         self.discovery = Discovery(index if index is not None else starter_index())
         self.font: FontInfo | None = None
@@ -301,9 +386,437 @@ class MeowText(App):
         box = Vertical(Label(label), widget, classes="field", id=id)
         return box
 
+    def decoration(self) -> ComposeResult:
+        yield Preview(id="decoration-preview")
+        yield Static("", id="decoration-meta", markup=False)
+        with Horizontal(id="decoration-panels"):
+            with Vertical(id="fill-pane", classes="bank"):
+                yield Lettering("LOOKS", id="fill-heading")
+                yield Static(
+                    "", id="fill-readout", classes="bank-readout", markup=False
+                )
+                yield Inventory(
+                    "look",
+                    [
+                        (name.replace("-", " ").title(), name)
+                        for name in self._preset_names
+                    ],
+                    value="cyan",
+                    id="look-inventory",
+                    presets=self._presets,
+                )
+                with VerticalScroll(id="fill-details", classes="detail-scroll hidden"):
+                    yield self.field(
+                        "Fill",
+                        Choices(
+                            [
+                                ("Solid", "solid"),
+                                ("Gradient", "gradient"),
+                                ("Font colours", "original"),
+                            ],
+                            value="solid",
+                            allow_blank=False,
+                            id="fill",
+                        ),
+                    )
+                    with TileGrid(classes="control-grid", id="solid-field"):
+                        yield self.field(
+                            "Colour",
+                            Choices(
+                                [(n.title(), n) for n in COLOURS]
+                                + [("Custom…", "custom")],
+                                value="cyan",
+                                allow_blank=False,
+                                id="solid-name",
+                            ),
+                        )
+                        yield self.field(
+                            "Custom colour · #hex",
+                            Input("#65e8ed", id="solid"),
+                            id="custom-solid-field",
+                        )
+                    with Vertical(id="gradient-settings", classes="options-body"):
+                        with TileGrid(classes="control-grid"):
+                            yield self.field(
+                                "Palette",
+                                Choices(
+                                    [(n.title(), n) for n in self._palettes]
+                                    + [("Custom…", "custom")],
+                                    value="ice",
+                                    allow_blank=False,
+                                    id="palette",
+                                ),
+                            )
+                            yield self.field(
+                                "Direction",
+                                Choices(
+                                    list(GRADIENT_DIRECTIONS),
+                                    value="horizontal",
+                                    allow_blank=False,
+                                    id="direction",
+                                ),
+                            )
+                        yield self.field(
+                            "Custom stops · #cyan,#violet as hex values",
+                            Input("#65e8ed,#d39dff", id="stops"),
+                            id="stops-field",
+                        )
+                        yield Checkbox("Hard colour bands", id="bands")
+                    yield self.field(
+                        "Font colour version",
+                        Choices(
+                            [],
+                            prompt="Original colour version",
+                            id="font-variant",
+                        ),
+                        id="variant-field",
+                    )
+                    yield self.field(
+                        "Rotate font colours · degrees",
+                        Input("0", id="hue", type="number"),
+                        id="hue-field",
+                    )
+                    yield Button("Browse preset looks", id="to-presets")
+                    yield Button("Paint cells or individual letters", id="paint-open")
+                    with Vertical(id="roles-section", classes="options-body"):
+                        yield Label("ANSI COLOUR ROLES", classes="bank-title")
+                        yield Static(
+                            "Edit the related colours in an ANSI font. Choose Original font colours in Fill to use these colours.",
+                            id="roles-help",
+                        )
+                        yield Choices(
+                            [], prompt="Choose a colour role", id="role-select"
+                        )
+                        yield Checkbox(
+                            "Focus this colour in the preview", id="role-focus"
+                        )
+                        yield Button("Split into separate sections", id="role-split")
+                        with TileGrid(classes="control-grid", id="role-controls"):
+                            yield Checkbox(
+                                "Follow the shared hue rotation",
+                                id="role-linked",
+                            )
+                            yield self.field(
+                                "Colour · #hex",
+                                Input("#ffffff", id="role-colour"),
+                            )
+                            yield self.field(
+                                "Hue · 0–360",
+                                Input("0", type="number", id="role-hue"),
+                            )
+                            yield self.field(
+                                "Saturation · 0–100",
+                                Input("100", type="number", id="role-sat"),
+                            )
+                            yield self.field(
+                                "Brightness · 0–100",
+                                Input("100", type="number", id="role-val"),
+                            )
+                yield Button(
+                    "↵ Tune colour  ·  Tab next panel",
+                    id="tune-fill",
+                    classes="tune-button",
+                )
+            with Vertical(id="outline-pane", classes="bank"):
+                yield Lettering("EDGES", id="outline-heading")
+                yield Static(
+                    "", id="outline-readout", classes="bank-readout", markup=False
+                )
+                yield Inventory(
+                    "edge",
+                    [("No border", "none"), *OUTLINE_MODES],
+                    value="none",
+                    id="edge-inventory",
+                    presets=self._presets,
+                )
+                with VerticalScroll(
+                    id="outline-details", classes="detail-scroll hidden"
+                ):
+                    yield self.field(
+                        "Border style",
+                        Choices(
+                            [("Off", "none"), *OUTLINE_MODES],
+                            value="none",
+                            allow_blank=False,
+                            id="outline-mode",
+                        ),
+                    )
+                    with Vertical(id="outline-settings", classes="options-body"):
+                        with TileGrid(classes="control-grid"):
+                            yield self.field(
+                                "Width",
+                                Choices(
+                                    [("Automatic", "0")]
+                                    + [
+                                        (
+                                            f"{i} cell" + ("s" if i != 1 else ""),
+                                            str(i),
+                                        )
+                                        for i in [1, 2, 3, 4, 6]
+                                    ],
+                                    value="0",
+                                    allow_blank=False,
+                                    id="outline-distance",
+                                ),
+                            )
+                            yield self.field(
+                                "Around",
+                                Choices(
+                                    list(OUTLINE_SCOPES),
+                                    value="word",
+                                    allow_blank=False,
+                                    id="outline-scope",
+                                ),
+                            )
+                            yield self.field(
+                                "Placement",
+                                Choices(
+                                    list(OUTLINE_PLACES),
+                                    value="both",
+                                    allow_blank=False,
+                                    id="outline-place",
+                                ),
+                            )
+                            yield self.field(
+                                "Fill",
+                                Choices(
+                                    [
+                                        ("Solid", "solid"),
+                                        ("Gradient", "gradient"),
+                                    ],
+                                    value="solid",
+                                    allow_blank=False,
+                                    id="outline-fill",
+                                ),
+                            )
+                            yield self.field(
+                                "Colour",
+                                Choices(
+                                    [(n.title(), n) for n in COLOURS]
+                                    + [("Custom…", "custom")],
+                                    value="slate",
+                                    allow_blank=False,
+                                    id="outline-name",
+                                ),
+                                id="outline-solid-field",
+                            )
+                        yield self.field(
+                            "Custom colour · #hex",
+                            Input("#5a5a6e", id="outline-color"),
+                            id="outline-color-field",
+                        )
+                        with TileGrid(
+                            classes="control-grid",
+                            id="outline-gradient-settings",
+                        ):
+                            yield self.field(
+                                "Palette",
+                                Choices(
+                                    [(n.title(), n) for n in self._palettes]
+                                    + [("Custom…", "custom")],
+                                    value="ice",
+                                    allow_blank=False,
+                                    id="outline-palette",
+                                ),
+                            )
+                            yield self.field(
+                                "Direction",
+                                Choices(
+                                    list(OUTLINE_DIRECTIONS),
+                                    value="horizontal",
+                                    allow_blank=False,
+                                    id="outline-direction",
+                                ),
+                            )
+                            yield self.field(
+                                "Motion speed multiplier",
+                                Input("1", type="number", id="outline-speed"),
+                            )
+                            yield Checkbox("Hard colour bands", id="outline-bands")
+                            yield self.field(
+                                "Custom stops · #hex,#hex",
+                                Input("#65e8ed,#d39dff", id="outline-stops"),
+                                id="outline-stops-field",
+                            )
+                        with TileGrid(classes="control-grid"):
+                            yield self.field(
+                                "Character",
+                                Choices(
+                                    list(self._symbols),
+                                    value="░",
+                                    allow_blank=False,
+                                    id="outline-char",
+                                ),
+                                id="outline-char-field",
+                            )
+                            yield self.field(
+                                "Sides",
+                                Choices(
+                                    [
+                                        ("All sides", "tblr"),
+                                        ("Top", "t"),
+                                        ("Bottom", "b"),
+                                        ("Left", "l"),
+                                        ("Right", "r"),
+                                        ("Top and bottom", "tb"),
+                                        ("Left and right", "lr"),
+                                    ],
+                                    value="tblr",
+                                    allow_blank=False,
+                                    id="outline-sides",
+                                ),
+                            )
+                            yield self.field(
+                                "Move horizontally",
+                                Input("0", type="integer", id="outline-dx"),
+                            )
+                            yield self.field(
+                                "Move vertically",
+                                Input("0", type="integer", id="outline-dy"),
+                            )
+                    yield Label("░ DROP SHADOW", classes="bank-title")
+                    yield Checkbox("Drop shadow", id="shadow")
+                    with TileGrid(id="shadow-settings", classes="control-grid"):
+                        yield self.field(
+                            "Colour",
+                            Choices(
+                                [(n.title(), n) for n in COLOURS]
+                                + [("Custom…", "custom")],
+                                value="ink",
+                                allow_blank=False,
+                                id="shadow-name",
+                            ),
+                        )
+                        yield self.field(
+                            "Custom colour · #hex",
+                            Input("#282830", id="shadow-color"),
+                            id="shadow-color-field",
+                        )
+                        yield self.field(
+                            "Character",
+                            Choices(
+                                [("Copy lettering", "copy")] + list(self._symbols),
+                                value="copy",
+                                allow_blank=False,
+                                id="shadow-char",
+                            ),
+                        )
+                        yield self.field(
+                            "Horizontal offset",
+                            Input("1", type="integer", id="shadow-dx"),
+                        )
+                        yield self.field(
+                            "Vertical offset",
+                            Input("1", type="integer", id="shadow-dy"),
+                        )
+                yield Button(
+                    "↵ Tune border  ·  Tab next panel",
+                    id="tune-outline",
+                    classes="tune-button",
+                )
+            with Vertical(id="motion-pane", classes="bank"):
+                yield Lettering("MOTION", id="motion-heading")
+                yield Static(
+                    "", id="motion-readout", classes="bank-readout", markup=False
+                )
+                yield Inventory(
+                    "motion",
+                    [("Still", "none"), *list(ANIMATIONS)[1:]],
+                    value="none",
+                    id="motion-inventory",
+                    presets=self._presets,
+                )
+                with VerticalScroll(
+                    id="motion-details", classes="detail-scroll hidden"
+                ):
+                    yield self.field(
+                        "Animation",
+                        Choices(
+                            list(ANIMATIONS),
+                            value="none",
+                            allow_blank=False,
+                            id="motion",
+                        ),
+                    )
+                    with Vertical(id="motion-settings", classes="options-body"):
+                        with TileGrid(classes="control-grid"):
+                            yield self.field(
+                                "Speed",
+                                Choices(
+                                    [
+                                        ("Slow", "0.5"),
+                                        ("Steady", "1"),
+                                        ("Fast", "2"),
+                                        ("Turbo", "3"),
+                                    ],
+                                    value="1",
+                                    allow_blank=False,
+                                    id="speed",
+                                ),
+                            )
+                            yield self.field(
+                                "Direction",
+                                Choices(
+                                    list(ANIM_DIRECTIONS),
+                                    value="forward",
+                                    allow_blank=False,
+                                    id="motion-direction",
+                                ),
+                            )
+                            yield self.field(
+                                "Animate",
+                                Choices(
+                                    list(ANIM_LAYERS),
+                                    value="all",
+                                    allow_blank=False,
+                                    id="motion-layers",
+                                ),
+                                id="motion-layers-field",
+                            )
+                            yield self.field(
+                                "Colour travel",
+                                Choices(
+                                    list(ANIM_TRAVELS),
+                                    value="360",
+                                    allow_blank=False,
+                                    id="motion-travel",
+                                ),
+                                id="motion-travel-field",
+                            )
+                        with TileGrid(classes="control-grid", id="trace-settings"):
+                            yield self.field(
+                                "Trace path",
+                                Choices(
+                                    list(TRACE_PATTERNS),
+                                    value="outline",
+                                    allow_blank=False,
+                                    id="trace-pattern",
+                                ),
+                            )
+                            yield self.field(
+                                "Trace behaviour",
+                                Choices(
+                                    list(TRACE_REVEALS),
+                                    value="draw",
+                                    allow_blank=False,
+                                    id="trace-reveal",
+                                ),
+                            )
+                        yield Button("Pause / play", id="play")
+                    yield Static(
+                        "Save keeps this animation's recipe and the frame you see. Use Watch in Save & use to play it in Kitty.",
+                        classes="help",
+                    )
+
+                yield Button(
+                    "↵ Tune motion  ·  Tab next panel",
+                    id="tune-motion",
+                    classes="tune-button",
+                )
+
     def compose(self) -> ComposeResult:
-        yield Static("meowtext  /  make text worth looking at", id="heading")
         with Horizontal(id="text-row"):
+            yield Showcase(id="showcase")
             yield Label("Words")
             yield Input(
                 self.project.text,
@@ -312,15 +825,18 @@ class MeowText(App):
                 placeholder="Type your banner text",
             )
             yield Static(
-                "Pick a shape. Choose a look. Save and use it.",
+                "Arrows explore. Tab switches panels. Make something loud.",
                 id="message",
                 markup=False,
             )
         with Horizontal(id="body"):
             with TabbedContent(id="sections", initial="fonts"):
-                with TabPane("Fonts", id="fonts"):
+                with TabPane("▧ FONTS / F1", id="fonts"):
                     with Horizontal(classes="toolbar"):
-                        yield Input(placeholder="Search fonts…", id="search")
+                        yield Input(
+                            placeholder="Find a feeling… gothic, thin, script, ANSI",
+                            id="search",
+                        )
                         yield Select(
                             [(x, x) for x in CATEGORIES],
                             value="All",
@@ -337,7 +853,7 @@ class MeowText(App):
                             allow_blank=False,
                             id="font-mode",
                         )
-                    with Horizontal(classes="toolbar"):
+                    with Horizontal(classes="toolbar", id="font-actions"):
                         yield Button("← Back", id="font-back")
                         yield Button("More choices", id="font-more")
                         yield Button("Start over", id="font-reset")
@@ -345,26 +861,32 @@ class MeowText(App):
                     yield Static("", id="font-count", markup=False)
                     with VerticalScroll(id="font-scroll"):
                         with TileGrid(classes="tiles", id="font-grid"):
-                            for i in range(6):
-                                with Vertical(classes="tile", id=f"font-tile-{i}"):
+                            for i in range(9):
+                                with FontCard(classes="tile", id=f"font-tile-{i}"):
                                     yield Static(
                                         "",
                                         id=f"font-title-{i}",
                                         classes="tile-title",
                                         markup=False,
                                     )
+                                    yield Static(
+                                        "",
+                                        id=f"font-detail-{i}",
+                                        classes="tile-detail",
+                                        markup=False,
+                                    )
                                     yield Preview(id=f"font-preview-{i}")
                                     with Horizontal():
-                                        yield Button("Choose", id=f"choose-{i}")
+                                        yield Button("Use font →", id=f"choose-{i}")
                                         yield Button(
                                             "☆", id=f"star-{i}", classes="star"
                                         )
                                         yield Button(
-                                            "More like this",
+                                            "Explore ↻",
                                             id=f"like-{i}",
                                             classes="like",
                                         )
-                with TabPane("Presets", id="presets"):
+                with TabPane("▤ LOOKS / F2", id="presets"):
                     with Horizontal(classes="toolbar"):
                         yield Button("← Previous", id="preset-prev")
                         yield Button("More presets →", id="preset-next")
@@ -379,404 +901,9 @@ class MeowText(App):
                                     )
                                     yield Preview(id=f"preset-preview-{i}")
                                     yield Button("Apply this look", id=f"preset-{i}")
-                with TabPane("Decorate", id="adjust"):
-                    yield Preview(id="decoration-preview")
-                    yield Static("", id="decoration-meta", markup=False)
-                    with TabbedContent(id="decoration-tabs", initial="fill-pane"):
-                        with TabPane("Fill", id="fill-pane"):
-                            with VerticalScroll(classes="control-scroll"):
-                                yield self.field(
-                                    "Fill",
-                                    Select(
-                                        [
-                                            ("Solid colour", "solid"),
-                                            ("Gradient", "gradient"),
-                                            ("Original font colours", "original"),
-                                        ],
-                                        value="solid",
-                                        allow_blank=False,
-                                        id="fill",
-                                    ),
-                                )
-                                with TileGrid(classes="control-grid", id="solid-field"):
-                                    yield self.field(
-                                        "Colour",
-                                        Select(
-                                            [(n.title(), n) for n in COLOURS]
-                                            + [("Custom…", "custom")],
-                                            value="cyan",
-                                            allow_blank=False,
-                                            id="solid-name",
-                                        ),
-                                    )
-                                    yield self.field(
-                                        "Custom colour · #hex",
-                                        Input("#65e8ed", id="solid"),
-                                        id="custom-solid-field",
-                                    )
-                                with Vertical(
-                                    id="gradient-settings", classes="options-body"
-                                ):
-                                    with TileGrid(classes="control-grid"):
-                                        yield self.field(
-                                            "Palette",
-                                            Select(
-                                                [(n.title(), n) for n in self._palettes]
-                                                + [("Custom…", "custom")],
-                                                value="ice",
-                                                allow_blank=False,
-                                                id="palette",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Direction",
-                                            Select(
-                                                list(GRADIENT_DIRECTIONS),
-                                                value="horizontal",
-                                                allow_blank=False,
-                                                id="direction",
-                                            ),
-                                        )
-                                    yield self.field(
-                                        "Custom stops · #cyan,#violet as hex values",
-                                        Input("#65e8ed,#d39dff", id="stops"),
-                                        id="stops-field",
-                                    )
-                                    yield Checkbox("Hard colour bands", id="bands")
-                                yield self.field(
-                                    "Font colour version",
-                                    Select(
-                                        [],
-                                        prompt="Original colour version",
-                                        id="font-variant",
-                                    ),
-                                    id="variant-field",
-                                )
-                                yield self.field(
-                                    "Rotate font colours · degrees",
-                                    Input("0", id="hue", type="number"),
-                                    id="hue-field",
-                                )
-                                yield Button("Browse preset looks", id="to-presets")
-                                yield Button(
-                                    "Paint cells or individual letters", id="paint-open"
-                                )
-                        with TabPane("Outline", id="outline-pane"):
-                            with VerticalScroll(classes="control-scroll"):
-                                yield Checkbox("Outline the lettering", id="outline")
-                                with Vertical(
-                                    id="outline-settings", classes="options-body"
-                                ):
-                                    with TileGrid(classes="control-grid"):
-                                        yield self.field(
-                                            "Shape",
-                                            Select(
-                                                list(OUTLINE_MODES),
-                                                value="shade",
-                                                allow_blank=False,
-                                                id="outline-mode",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Width",
-                                            Select(
-                                                [("Automatic", "0")]
-                                                + [
-                                                    (
-                                                        f"{i} cell"
-                                                        + ("s" if i != 1 else ""),
-                                                        str(i),
-                                                    )
-                                                    for i in [1, 2, 3, 4, 6]
-                                                ],
-                                                value="0",
-                                                allow_blank=False,
-                                                id="outline-distance",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Around",
-                                            Select(
-                                                list(OUTLINE_SCOPES),
-                                                value="word",
-                                                allow_blank=False,
-                                                id="outline-scope",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Placement",
-                                            Select(
-                                                list(OUTLINE_PLACES),
-                                                value="both",
-                                                allow_blank=False,
-                                                id="outline-place",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Fill",
-                                            Select(
-                                                [
-                                                    ("Solid colour", "solid"),
-                                                    ("Gradient", "gradient"),
-                                                ],
-                                                value="solid",
-                                                allow_blank=False,
-                                                id="outline-fill",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Colour",
-                                            Select(
-                                                [(n.title(), n) for n in COLOURS]
-                                                + [("Custom…", "custom")],
-                                                value="slate",
-                                                allow_blank=False,
-                                                id="outline-name",
-                                            ),
-                                            id="outline-solid-field",
-                                        )
-                                    yield self.field(
-                                        "Custom colour · #hex",
-                                        Input("#5a5a6e", id="outline-color"),
-                                        id="outline-color-field",
-                                    )
-                                    with TileGrid(
-                                        classes="control-grid",
-                                        id="outline-gradient-settings",
-                                    ):
-                                        yield self.field(
-                                            "Palette",
-                                            Select(
-                                                [(n.title(), n) for n in self._palettes]
-                                                + [("Custom…", "custom")],
-                                                value="ice",
-                                                allow_blank=False,
-                                                id="outline-palette",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Direction",
-                                            Select(
-                                                list(OUTLINE_DIRECTIONS),
-                                                value="horizontal",
-                                                allow_blank=False,
-                                                id="outline-direction",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Motion speed multiplier",
-                                            Input(
-                                                "1", type="number", id="outline-speed"
-                                            ),
-                                        )
-                                        yield Checkbox(
-                                            "Hard colour bands", id="outline-bands"
-                                        )
-                                        yield self.field(
-                                            "Custom stops · #hex,#hex",
-                                            Input(
-                                                "#65e8ed,#d39dff", id="outline-stops"
-                                            ),
-                                            id="outline-stops-field",
-                                        )
-                                    with TileGrid(classes="control-grid"):
-                                        yield self.field(
-                                            "Character",
-                                            Select(
-                                                list(self._symbols),
-                                                value="░",
-                                                allow_blank=False,
-                                                id="outline-char",
-                                            ),
-                                            id="outline-char-field",
-                                        )
-                                        yield self.field(
-                                            "Sides",
-                                            Select(
-                                                [
-                                                    ("All sides", "tblr"),
-                                                    ("Top", "t"),
-                                                    ("Bottom", "b"),
-                                                    ("Left", "l"),
-                                                    ("Right", "r"),
-                                                    ("Top and bottom", "tb"),
-                                                    ("Left and right", "lr"),
-                                                ],
-                                                value="tblr",
-                                                allow_blank=False,
-                                                id="outline-sides",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Move horizontally",
-                                            Input("0", type="integer", id="outline-dx"),
-                                        )
-                                        yield self.field(
-                                            "Move vertically",
-                                            Input("0", type="integer", id="outline-dy"),
-                                        )
-                        with TabPane("Colour roles", id="roles-pane"):
-                            with VerticalScroll(classes="control-scroll"):
-                                yield Static(
-                                    "Edit the related colours in an ANSI font. Choose Original font colours in Fill to use these colours.",
-                                    id="roles-help",
-                                )
-                                yield Select(
-                                    [], prompt="Choose a colour role", id="role-select"
-                                )
-                                yield Checkbox(
-                                    "Focus this colour in the preview", id="role-focus"
-                                )
-                                yield Button(
-                                    "Split into separate sections", id="role-split"
-                                )
-                                with TileGrid(
-                                    classes="control-grid", id="role-controls"
-                                ):
-                                    yield Checkbox(
-                                        "Follow the shared hue rotation",
-                                        id="role-linked",
-                                    )
-                                    yield self.field(
-                                        "Colour · #hex",
-                                        Input("#ffffff", id="role-colour"),
-                                    )
-                                    yield self.field(
-                                        "Hue · 0–360",
-                                        Input("0", type="number", id="role-hue"),
-                                    )
-                                    yield self.field(
-                                        "Saturation · 0–100",
-                                        Input("100", type="number", id="role-sat"),
-                                    )
-                                    yield self.field(
-                                        "Brightness · 0–100",
-                                        Input("100", type="number", id="role-val"),
-                                    )
-                        with TabPane("Shadow", id="shadow-pane"):
-                            with VerticalScroll(classes="control-scroll"):
-                                yield Checkbox("Drop shadow", id="shadow")
-                                with TileGrid(
-                                    id="shadow-settings", classes="control-grid"
-                                ):
-                                    yield self.field(
-                                        "Colour",
-                                        Select(
-                                            [(n.title(), n) for n in COLOURS]
-                                            + [("Custom…", "custom")],
-                                            value="ink",
-                                            allow_blank=False,
-                                            id="shadow-name",
-                                        ),
-                                    )
-                                    yield self.field(
-                                        "Custom colour · #hex",
-                                        Input("#282830", id="shadow-color"),
-                                        id="shadow-color-field",
-                                    )
-                                    yield self.field(
-                                        "Character",
-                                        Select(
-                                            [("Copy lettering", "copy")]
-                                            + list(self._symbols),
-                                            value="copy",
-                                            allow_blank=False,
-                                            id="shadow-char",
-                                        ),
-                                    )
-                                    yield self.field(
-                                        "Horizontal offset",
-                                        Input("1", type="integer", id="shadow-dx"),
-                                    )
-                                    yield self.field(
-                                        "Vertical offset",
-                                        Input("1", type="integer", id="shadow-dy"),
-                                    )
-                        with TabPane("Motion", id="motion-pane"):
-                            with VerticalScroll(classes="control-scroll"):
-                                yield self.field(
-                                    "Animation",
-                                    Select(
-                                        list(ANIMATIONS),
-                                        value="none",
-                                        allow_blank=False,
-                                        id="motion",
-                                    ),
-                                )
-                                with Vertical(
-                                    id="motion-settings", classes="options-body"
-                                ):
-                                    with TileGrid(classes="control-grid"):
-                                        yield self.field(
-                                            "Speed",
-                                            Select(
-                                                [
-                                                    ("Slow", "0.5"),
-                                                    ("Steady", "1"),
-                                                    ("Fast", "2"),
-                                                    ("Very fast", "3"),
-                                                ],
-                                                value="1",
-                                                allow_blank=False,
-                                                id="speed",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Direction",
-                                            Select(
-                                                list(ANIM_DIRECTIONS),
-                                                value="forward",
-                                                allow_blank=False,
-                                                id="motion-direction",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Animate",
-                                            Select(
-                                                list(ANIM_LAYERS),
-                                                value="all",
-                                                allow_blank=False,
-                                                id="motion-layers",
-                                            ),
-                                            id="motion-layers-field",
-                                        )
-                                        yield self.field(
-                                            "Colour travel",
-                                            Select(
-                                                list(ANIM_TRAVELS),
-                                                value="360",
-                                                allow_blank=False,
-                                                id="motion-travel",
-                                            ),
-                                            id="motion-travel-field",
-                                        )
-                                    with TileGrid(
-                                        classes="control-grid", id="trace-settings"
-                                    ):
-                                        yield self.field(
-                                            "Trace path",
-                                            Select(
-                                                list(TRACE_PATTERNS),
-                                                value="outline",
-                                                allow_blank=False,
-                                                id="trace-pattern",
-                                            ),
-                                        )
-                                        yield self.field(
-                                            "Trace behaviour",
-                                            Select(
-                                                list(TRACE_REVEALS),
-                                                value="draw",
-                                                allow_blank=False,
-                                                id="trace-reveal",
-                                            ),
-                                        )
-                                    yield Button("Play / pause preview", id="play")
-                                yield Static(
-                                    "Save keeps this animation's recipe and the frame you see. Use Watch in Save & use to play it in Kitty.",
-                                    classes="help",
-                                )
-                with TabPane("Save & use", id="save"):
+                with TabPane("◈ DECORATE / F3", id="adjust"):
+                    yield from self.decoration()
+                with TabPane("↗ SAVE & USE / F4", id="save"):
                     with VerticalScroll(id="save-scroll"):
                         yield Label(
                             "1. Give your design a name", classes="section-label"
@@ -871,7 +998,7 @@ class MeowText(App):
         self._refresh_library()
         self._usage()
         self.set_interval(0.12, self._tick)
-        self.query_one("#search", Input).focus()
+        self.query_one("#font-tile-0").focus()
         self.call_after_refresh(self._enable_edits)
         if self._provided_index is None:
             self._index_fonts()
@@ -881,6 +1008,158 @@ class MeowText(App):
     def _enable_edits(self):
         self._controls_ready = True
         self._fit_tiles()
+
+    def on_descendant_focus(self, event):
+        if self._controls_ready and not self._closing and len(self.screen_stack) == 1:
+            self._focus_help(event.widget)
+
+    def _focus_help(self, widget=None):
+        widget = widget or self.focused
+        if isinstance(widget, Inventory):
+            label = {"look": "LOOKS", "edge": "EDGES", "motion": "MOTION"}[widget.kind]
+            message = f"{label} {widget._index()+1}/{len(widget._options)} · Arrows try · Tab panel · Enter tune · Ctrl+Z undo · F5 freezes interface motion"
+        elif isinstance(widget, FontCard):
+            message = "Arrows compare · Enter explores · Space uses · F favourites · I full size · Ctrl+T words"
+            index = int(widget.id.rsplit("-", 1)[1])
+            if index < len(self.discovery.choices):
+                item = self.discovery.choices[index]
+                self.query_one("#message", Static).update(
+                    item.font.name + " · " + item.description
+                )
+        elif isinstance(widget, Choices):
+            message = "Arrows change immediately · Tab next setting · Escape returns to specimens · Alt+1/2/3 switches panels"
+        else:
+            message = f"{len(self.discovery.all):,} fonts · F1 fonts · F2 looks · F3 decorate · F4 save & use · Ctrl+T words"
+        self.query_one("#index-state", Static).update(message)
+
+    def _sync_inventories(self):
+        style = self.project.style
+        name = next(
+            (name for name, preset in self._presets.items() if preset == style),
+            Select.BLANK,
+        )
+        self._set_control("look-inventory", name)
+        self._set_control(
+            "edge-inventory", style.outline_mode if style.outline else "none"
+        )
+        self._set_control("motion-inventory", self.project.animation.name)
+        for bank, label in (
+            (
+                "fill",
+                (
+                    str(name).replace("-", " ").title()
+                    if name != Select.BLANK
+                    else "Custom look"
+                ),
+            ),
+            ("outline", style.outline_mode.title() if style.outline else "No border"),
+            (
+                "motion",
+                (
+                    self.project.animation.name.title()
+                    if self.project.animation.name != "none"
+                    else "Still"
+                ),
+            ),
+        ):
+            self.query_one(f"#{bank}-readout", Static).update(
+                "◆ " + label + "  ·  arrows try / ↵ tune"
+            )
+
+    def on_inventory_tune(self, event: Inventory.Tune):
+        name = {"look": "fill", "edge": "outline", "motion": "motion"}[
+            event.inventory.kind
+        ]
+        self._tune_bank(name)
+
+    def _tune_bank(self, name, close=False):
+        details = self.query_one(f"#{name}-details")
+        inventory = self.query_one(
+            {
+                "fill": "#look-inventory",
+                "outline": "#edge-inventory",
+                "motion": "#motion-inventory",
+            }[name]
+        )
+        opening = not close and not details.display
+        self.set_focus(None)
+        details.set_class(not opening, "hidden")
+        inventory.display = not opening
+        self.query_one(f"#tune-{name}", Button).label = (
+            "Esc · back to specimens" if opening else "↵ Tune  ·  Tab next panel"
+        )
+        target = (
+            self.query_one(
+                {"fill": "#fill", "outline": "#outline-mode", "motion": "#motion"}[name]
+            )
+            if opening
+            else inventory
+        )
+        self.call_after_refresh(target.focus)
+
+    def _remember_effect(self):
+        if self._controls_ready:
+            self._undo.append(copy.deepcopy(self.project))
+            self._undo = self._undo[-40:]
+
+    def action_undo_effect(self):
+        if self._undo and self.query_one("#sections", TabbedContent).active == "adjust":
+            self.project = self._undo.pop()
+            self.frame = 0
+            self.source_key = None
+            self.playing = self.project.animation.name != "none"
+            self._sync_controls()
+            self._render_selected()
+            self._dirty = True
+            self._say("Previous effect restored")
+
+    def action_ui_motion(self):
+        widget = self.query_one("#showcase", Showcase)
+        widget.running = not widget.running
+        self._say(
+            "Interface motion playing"
+            if widget.running
+            else "Interface motion paused · F5 resumes"
+        )
+
+    def font_action(self, action, index):
+        if index >= len(self.discovery.choices):
+            return
+        item = self.discovery.choices[index]
+        if action == "inspect":
+            try:
+                grid, missing, folded = layout_font(
+                    self.query_one("#text", Input).value, item.font
+                )
+                self.push_screen(
+                    Inspect(
+                        Banner(present(grid, BannerStyle()), item.font, missing, folded)
+                    )
+                )
+            except (MeowTextError, ValueError) as exc:
+                self._say(str(exc))
+            return
+        if action == "star":
+            library.toggle_favourite(item.font)
+            self._favourites = library.favourites()
+            self._refresh_gallery()
+        else:
+            self._set_font(item.font)
+            if action == "like":
+                self.discovery.narrow(index)
+                self._refresh_gallery()
+                self.query_one("#font-tile-0").focus()
+            else:
+                self.action_section("adjust")
+
+    def move_card(self, index, x, y):
+        columns = (
+            3
+            if self.screen.has_class("wide")
+            else 1 if self.screen.has_class("narrow") else 2
+        )
+        index = (index + x + y * columns) % max(1, len(self.discovery.choices))
+        self.query_one(f"#font-tile-{index}").focus()
 
     @work(thread=True, exclusive=True, group="index")
     def _index_fonts(self) -> None:
@@ -900,24 +1179,26 @@ class MeowText(App):
                 )
 
     def _index_status(self, current: int, total: int) -> None:
-        self.query_one("#index-state", Static).update(
+        self.screen_stack[0].query_one("#index-state", Static).update(
             f"Indexing fonts {current:,}/{total:,} · you can browse the starter set now"
             if current < total
             else f"{total:,} font families indexed locally · Tab moves focus · F1–F4 change section"
         )
+        if current == total and len(self.screen_stack) == 1:
+            self._focus_help()
 
     def _indexed(self, items: list[Specimen]) -> None:
         self._index_ready = True
         self.discovery.all = items
         # Avoid replacing the user's current narrowing round under their cursor.
-        if self.discovery.history:
+        if self.discovery.history or len(self.screen_stack) > 1:
             self._index_pending = items
             self._say("Full library ready. Start over to explore all fonts.")
         else:
             self._filter()
 
     def _say(self, message: str) -> None:
-        self.query_one("#message", Static).update(message)
+        self.screen_stack[0].query_one("#message", Static).update(message)
         if self.size.width < 105:
             self.notify(message, timeout=4)
 
@@ -980,7 +1261,7 @@ class MeowText(App):
             )
             self.last_banner = Banner(grid, self.font, self._missing, self._folded)
             preview_grid = grid
-            focused = self.query_one("#role-select", Select).value
+            focused = self.query_one("#role-select", Choices).value
             if (
                 self.query_one("#role-focus", Checkbox).value
                 and focused != Select.BLANK
@@ -1024,8 +1305,8 @@ class MeowText(App):
             (self.font,),
         )
         self._variant_fonts = {str(i): font for i, font in enumerate(members)}
-        widget = self.query_one("#font-variant", Select)
-        with widget.prevent(Select.Changed):
+        widget = self.query_one("#font-variant", Choices)
+        with widget.prevent(widget.Changed):
             widget.set_options(
                 [(font.name, key) for key, font in self._variant_fonts.items()]
             )
@@ -1040,13 +1321,14 @@ class MeowText(App):
         if signature == self._role_signature:
             return
         self._role_signature = signature
-        widget = self.query_one("#role-select", Select)
-        with widget.prevent(Select.Changed):
+        widget = self.query_one("#role-select", Choices)
+        with widget.prevent(widget.Changed):
             widget.set_options(
                 [(self.project.roles[slot].name, str(slot)) for slot in slots]
             )
             if slots:
                 widget.value = str(slots[0])
+        self.query_one("#roles-section").display = bool(slots)
         self.query_one("#role-controls").display = bool(slots)
         self.query_one("#role-select").display = bool(slots)
         self.query_one("#role-focus").display = bool(slots)
@@ -1060,7 +1342,7 @@ class MeowText(App):
             self._show_role()
 
     def _show_role(self):
-        selected = self.query_one("#role-select", Select).value
+        selected = self.query_one("#role-select", Choices).value
         if selected == Select.BLANK:
             return
         role = self.project.roles.get(int(selected))
@@ -1078,7 +1360,7 @@ class MeowText(App):
             self._set_control(key, value)
 
     def _edit_role(self, name):
-        selected = self.query_one("#role-select", Select).value
+        selected = self.query_one("#role-select", Choices).value
         if selected == Select.BLANK:
             return
         palette = RelationPalette(hue=self.project.hue, roles=self.project.roles)
@@ -1140,24 +1422,38 @@ class MeowText(App):
         )
         self._browse_page = 0
         if mode != "discover":
-            self.discovery.choices = self.discovery.pool[:6]
+            self.discovery.choices = self.discovery.pool[: self.discovery.count]
         self._refresh_gallery()
 
     def _refresh_gallery(self) -> None:
         self._gallery_generation += 1
         generation = self._gallery_generation
         choices = self.discovery.choices
-        for i in range(6):
+        for i in range(9):
             tile = self.query_one(f"#font-tile-{i}")
             tile.display = i < len(choices)
             if i < len(choices):
                 item = choices[i]
-                self.query_one(f"#font-title-{i}", Static).update(item.font.name)
+                self.query_one(f"#font-title-{i}", Static).update(
+                    f"{i+1}  {item.font.name}"
+                )
+                relation = (
+                    "Wildcard · " if item.font.id in self.discovery.explorers else ""
+                )
+                self.query_one(f"#font-detail-{i}", Static).update(
+                    relation + item.description
+                )
+                tile.tooltip = (
+                    item.font.name
+                    + " · "
+                    + item.description
+                    + " · I inspects at full size"
+                )
                 self.query_one(f"#star-{i}", Button).label = (
                     "★" if font_key(item.font) in self._favourites else "☆"
                 )
                 self.query_one(f"#font-preview-{i}", Preview).update("Rendering…")
-        note = f"{len(self.discovery.pool):,} choices · {len(self.discovery.history)} narrowing steps · Choose keeps a font; More like this narrows"
+        note = f"{len(self.discovery.pool):,} nearby / {len(self.discovery.all):,} fonts · Enter explores · Space uses · F favourites · Wildcards keep other directions open"
         if not choices:
             note = "No matches. Try All, clear the search, or star some fonts first."
         self.query_one("#font-count", Static).update(note)
@@ -1174,16 +1470,29 @@ class MeowText(App):
             try:
                 source, missing, folded = layout_font(words, item.font)
                 grid = present(source, BannerStyle())
-                self.call_later(self._gallery_result, generation, i, grid, None)
+                warning = (
+                    "Missing: " + " ".join(missing)
+                    if missing
+                    else "Uppercase font" if folded else ""
+                )
+                self.call_later(
+                    self._gallery_result, generation, i, grid, None, warning
+                )
             except (MeowTextError, ValueError) as exc:
                 self.call_later(self._gallery_result, generation, i, None, str(exc))
 
-    def _gallery_result(self, generation, index, grid, error):
+    def _gallery_result(self, generation, index, grid, error, warning=""):
         if generation != self._gallery_generation:
             return
-        view = self.query_one(f"#font-preview-{index}", Preview)
+        editor = self.screen_stack[0]
+        view = editor.query_one(f"#font-preview-{index}", Preview)
         if grid is not None:
             view.show(grid)
+            if warning:
+                item = self.discovery.choices[index]
+                editor.query_one(f"#font-detail-{index}", Static).update(
+                    warning + " · " + item.description
+                )
         else:
             view.update(error or "Could not render")
 
@@ -1243,10 +1552,12 @@ class MeowText(App):
 
     def _set_control(self, name, value):
         widget = self.query_one(f"#{name}")
-        if isinstance(widget, Select):
+        if isinstance(widget, (Select, Choices)):
             # Preserve values from older projects even if they aren't a standard option.
-            with widget.prevent(Select.Changed):
-                if value not in {v for _, v in widget._options}:
+            with widget.prevent(widget.Changed):
+                if value != Select.BLANK and value not in {
+                    v for _, v in widget._options
+                }:
                     widget.set_options(list(widget._options) + [(str(value), value)])
                 widget.value = value
         elif isinstance(widget, Input):
@@ -1283,8 +1594,7 @@ class MeowText(App):
             ),
             "direction": style.direction,
             "bands": style.bands,
-            "outline": style.outline,
-            "outline-mode": style.outline_mode,
+            "outline-mode": style.outline_mode if style.outline else "none",
             "outline-distance": str(style.outline_distance),
             "outline-scope": style.outline_scope,
             "outline-place": style.outline_place,
@@ -1333,9 +1643,10 @@ class MeowText(App):
         finally:
             self._syncing = False
         self._visibility()
+        self._sync_inventories()
 
     def _visibility(self):
-        select = lambda name: self.query_one(f"#{name}", Select).value
+        select = lambda name: self.query_one(f"#{name}", Choices).value
         mode, motion = select("fill"), select("motion")
         self.query_one("#solid-field").display = mode == "solid"
         self.query_one("#custom-solid-field").display = select("solid-name") == "custom"
@@ -1347,9 +1658,7 @@ class MeowText(App):
         self.query_one("#hue-field").display = (
             mode == "original" and self.font is not None and self.font.kind == "color"
         )
-        self.query_one("#outline-settings").display = self.query_one(
-            "#outline", Checkbox
-        ).value
+        self.query_one("#outline-settings").display = self.project.style.outline
         self.query_one("#outline-solid-field").display = (
             select("outline-fill") == "solid"
         )
@@ -1386,8 +1695,9 @@ class MeowText(App):
         if id in {"role-linked", "role-colour", "role-hue", "role-sat", "role-val"}:
             self._edit_role(id)
             return
+        self._remember_effect()
         style, motion = self.project.style, self.project.animation
-        select = lambda name: str(self.query_one(f"#{name}", Select).value)
+        select = lambda name: str(self.query_one(f"#{name}", Choices).value)
         value = lambda name: self.query_one(f"#{name}", Input).value
         check = lambda name: self.query_one(f"#{name}", Checkbox).value
 
@@ -1438,7 +1748,6 @@ class MeowText(App):
                     style.outline_stops = stops
             for name, attr in {
                 "direction": "direction",
-                "outline-mode": "outline_mode",
                 "outline-scope": "outline_scope",
                 "outline-place": "outline_place",
                 "outline-sides": "outline_sides",
@@ -1447,9 +1756,13 @@ class MeowText(App):
             }.items():
                 if id == name:
                     setattr(style, attr, select(name))
-            for name in {"outline", "shadow", "bands", "outline-bands"}:
+            for name in {"shadow", "bands", "outline-bands"}:
                 if id == name:
                     setattr(style, name.replace("-", "_"), check(name))
+            if id == "outline-mode":
+                style.outline = select(id) != "none"
+                if style.outline:
+                    style.outline_mode = select(id)
             if id == "outline-distance":
                 style.outline_distance = int(select(id))
             if id == "outline-speed":
@@ -1484,6 +1797,7 @@ class MeowText(App):
             return
         self._dirty = True
         self._visibility()
+        self._sync_inventories()
         self._render_selected()
 
     def on_select_changed(self, event: Select.Changed):
@@ -1510,6 +1824,30 @@ class MeowText(App):
             self._auto_path(format_changed=True)
         else:
             self._adjust(id)
+
+    def on_choices_changed(self, event: Choices.Changed):
+        if not self._controls_ready or self._syncing:
+            return
+        name = event.control.id
+        if name == "look-inventory":
+            self._remember_effect()
+            if event.value in self._presets:
+                self.project.style = self._presets[event.value].clone()
+                self._dirty = True
+                self._sync_controls()
+                self._render_selected()
+        elif name in {"edge-inventory", "motion-inventory"}:
+            target = "outline-mode" if name == "edge-inventory" else "motion"
+            self._set_control(target, event.value)
+            self._adjust(target)
+        elif name == "role-select":
+            self._show_role()
+            self._render_selected()
+        elif name == "font-variant" and str(event.value) in self._variant_fonts:
+            self._set_font(self._variant_fonts[str(event.value)])
+        else:
+            self._adjust(name)
+        self._focus_help()
 
     def on_checkbox_changed(self, event: Checkbox.Changed):
         if event.checkbox.id == "role-focus":
@@ -1557,9 +1895,7 @@ class MeowText(App):
     def on_tabbed_content_tab_activated(self, event):
         if event.tabbed_content.id != "sections":
             return
-        self.query_one("#sidebar").display = (
-            event.pane.id != "adjust" and self.size.width >= 105
-        )
+        self.query_one("#sidebar").display = False
         if event.pane.id == "presets":
             self._refresh_presets()
         if event.pane.id == "adjust":
@@ -1569,20 +1905,11 @@ class MeowText(App):
 
     def on_button_pressed(self, event: Button.Pressed):
         id = event.button.id or ""
-        if id.startswith(("choose-", "like-", "star-")):
-            index = int(id.rsplit("-", 1)[1])
-            if index >= len(self.discovery.choices):
-                return
-            item = self.discovery.choices[index]
-            if id.startswith("star-"):
-                library.toggle_favourite(item.font)
-                self._favourites = library.favourites()
-                self._refresh_gallery()
-            else:
-                self._set_font(item.font)
-                if id.startswith("like-"):
-                    self.discovery.narrow(index)
-                    self._refresh_gallery()
+        if id.startswith("tune-"):
+            self._tune_bank(id.removeprefix("tune-"))
+        elif id.startswith(("choose-", "like-", "star-")):
+            action, index = id.rsplit("-", 1)
+            self.font_action(action, int(index))
         elif id == "font-back":
             self.discovery.back()
             self._refresh_gallery()
@@ -1597,10 +1924,14 @@ class MeowText(App):
                 self.discovery.more()
             else:
                 self._browse_page = (getattr(self, "_browse_page", 0) + 1) % max(
-                    1, (len(self.discovery.pool) + 5) // 6
+                    1,
+                    (len(self.discovery.pool) + self.discovery.count - 1)
+                    // self.discovery.count,
                 )
                 self.discovery.choices = self.discovery.pool[
-                    self._browse_page * 6 : self._browse_page * 6 + 6
+                    self._browse_page
+                    * self.discovery.count : (self._browse_page + 1)
+                    * self.discovery.count
                 ]
             self._refresh_gallery()
         elif id == "use-font":
@@ -1615,7 +1946,7 @@ class MeowText(App):
                 self._paint_result,
             )
         elif id == "role-split":
-            slot = self.query_one("#role-select", Select).value
+            slot = self.query_one("#role-select", Choices).value
             if slot != Select.BLANK:
                 before = len(used_slots(self.source))
                 self.project.role_splits += (int(slot),)
@@ -1685,6 +2016,25 @@ class MeowText(App):
         self._render_selected()
 
     def _tick(self):
+        # Timers may run while a modal owns the screen or children unmount.
+        # Never query the editor through the active modal, or a partial DOM.
+        if (
+            self._closing
+            or not self.is_running
+            or len(self.screen_stack) != 1
+            or not self.query("#showcase")
+            or not self.query("#sections")
+        ):
+            return
+        if (
+            self.query_one("#sections", TabbedContent).active == "adjust"
+            and len(self.screen_stack) == 1
+        ):
+            self._inventory_frame = getattr(self, "_inventory_frame", 0) + 1
+            if self.query_one("#showcase", Showcase).running:
+                self.query_one("#motion-inventory", Inventory).advance(
+                    self._inventory_frame
+                )
         if (
             self.playing
             and self.project.animation.name != "none"
@@ -1716,7 +2066,7 @@ class MeowText(App):
 
     def _refresh_library(self):
         widget = self.query_one("#library-select", Select)
-        with widget.prevent(Select.Changed):
+        with widget.prevent(widget.Changed):
             widget.set_options([(name, name) for name in library.entries()])
 
     def _open_saved(self, name):
@@ -1820,13 +2170,29 @@ class MeowText(App):
         # A focused control in the departing pane can otherwise reactivate it.
         self.set_focus(None)
         self.query_one("#sections", TabbedContent).active = name
+        if name == "adjust":
+            self._tune_bank("fill", close=True)
         target = {
             "fonts": "#search",
             "presets": "#preset-next",
-            "adjust": "#fill",
+            "adjust": "#look-inventory",
             "save": "#save-name",
         }[name]
         self.call_after_refresh(self.query_one(target).focus)
+
+    def action_bank(self, name):
+        self.set_focus(None)
+        self.query_one("#sections", TabbedContent).active = "adjust"
+        self._tune_bank(name, close=True)
+        self.call_after_refresh(
+            self.query_one(
+                {
+                    "fill": "#look-inventory",
+                    "outline": "#edge-inventory",
+                    "motion": "#motion-inventory",
+                }[name]
+            ).focus
+        )
 
     def action_fonts(self):
         self.action_section("fonts")
@@ -1840,13 +2206,30 @@ class MeowText(App):
         self.query_one("#save-name", Input).focus()
 
     def action_inspect(self):
-        if self.last_banner:
+        if isinstance(self.focused, FontCard):
+            self.font_action("inspect", int(self.focused.id.rsplit("-", 1)[1]))
+        elif self.last_banner:
             self.push_screen(Inspect(self.last_banner))
 
     def action_back(self):
         if isinstance(self.screen, ModalScreen):
             self.screen.dismiss(None)
-        elif self.discovery.history:
+        elif self.query_one("#sections", TabbedContent).active == "adjust" and any(
+            self.query_one("#" + name + "-details").display
+            for name in ("fill", "outline", "motion")
+        ):
+            self._tune_bank(
+                next(
+                    name
+                    for name in ("fill", "outline", "motion")
+                    if self.query_one("#" + name + "-details").display
+                ),
+                close=True,
+            )
+        elif (
+            self.query_one("#sections", TabbedContent).active == "fonts"
+            and self.discovery.history
+        ):
             self.discovery.back()
             self._refresh_gallery()
         else:
@@ -1857,10 +2240,13 @@ class MeowText(App):
         self.screen.set_class(width < 105, "compact")
         self.screen.set_class(self.size.height < 30, "short")
         if self.query("#sidebar"):
-            self.query_one("#sidebar").display = (
-                width >= 105
-                and self.query_one("#sections", TabbedContent).active != "adjust"
-            )
+            self.query_one("#sidebar").display = False
+        wide = width >= 145 and self.size.height >= 37
+        self.screen.set_class(wide, "wide")
+        if self.discovery.count != (9 if wide else 6):
+            self.discovery.resize(9 if wide else 6)
+            if self.is_mounted:
+                self._refresh_gallery()
         self.screen.set_class(width < 70, "narrow")
         if self.is_mounted:
             self.call_after_refresh(self._fit_tiles)
@@ -1868,10 +2254,16 @@ class MeowText(App):
     def _fit_tiles(self):
         if not self.query("#font-scroll"):
             return
-        height = max(7, min(11, (self.query_one("#font-scroll").size.height - 2) // 3))
-        for i in range(6):
+        columns = (
+            3
+            if self.screen.has_class("wide")
+            else 1 if self.screen.has_class("narrow") else 2
+        )
+        rows = (self.discovery.count + columns - 1) // columns
+        height = max(8, self.query_one("#font-scroll").size.height // rows)
+        for i in range(9):
             self.query_one(f"#font-tile-{i}").styles.height = height
-            self.query_one(f"#font-preview-{i}").styles.height = height - 4
+            self.query_one(f"#font-preview-{i}").styles.height = max(3, height - 5)
 
     def on_resize(self, event):
         if self.is_mounted:
