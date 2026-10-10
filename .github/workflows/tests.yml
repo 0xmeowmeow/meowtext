@@ -13,6 +13,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: sudo apt-get update && sudo apt-get install -y figlet toilet fonts-dejavu-core fonts-hack-ttf zsh
+      - run: sudo apt-get update && sudo apt-get install -y figlet toilet fonts-dejavu-core fonts-hack-ttf zsh imagemagick
       - run: python -m pip install .
       - run: python -m unittest discover -s tests -q

@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import math
+import shutil
 import subprocess
 from io import BytesIO
 
@@ -536,8 +537,11 @@ def _gauge(draw, amount, width, height) -> None:
 
 
 def _magick_svg(raw: bytes, width: int) -> Image.Image:
+    executable = shutil.which("magick") or shutil.which("convert")
+    if executable is None:
+        raise RuntimeError("SVG panels need ImageMagick. Install the imagemagick system package.")
     completed = subprocess.run(
-        ["magick", "-background", "none", "svg:-", "-resize", f"{max(1, width)}x", "png:-"],
+        [executable, "-background", "none", "svg:-", "-resize", f"{max(1, width)}x", "png:-"],
         input=raw,
         capture_output=True,
         check=False,

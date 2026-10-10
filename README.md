@@ -113,6 +113,8 @@ Designs live in `~/.config/meowtext/library`. `XDG_CONFIG_HOME`, `XDG_CACHE_HOME
 
 ## Development
 
+The retained experimental SVG panel tools also need ImageMagick (`sudo apt install imagemagick` on Debian/Ubuntu). Both ImageMagick 6's `convert` and ImageMagick 7's `magick` are supported. CI installs it to test those tools alongside the editor.
+
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install -e .

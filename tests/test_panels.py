@@ -73,6 +73,18 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(image.size, (32, 24))
         self.assertTrue(_green(image))
 
+    def test_svg_uses_convert_when_magick_is_not_installed(self) -> None:
+        import shutil
+        from unittest.mock import patch
+        convert = shutil.which("convert")
+        if convert is None:
+            self.skipTest("ImageMagick convert is not installed")
+        svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><rect width="20" height="20" fill="#fff"/></svg>'
+        with patch("meowtext.panels.shutil.which", side_effect=lambda name: convert if name == "convert" else None):
+            image = render_svg(svg, 32, 24)
+        self.assertEqual(image.size, (32, 24))
+        self.assertTrue(_green(image))
+
     def _picture(self) -> str:
         path = "/tmp/phosphor-panel-source.png"
         image = Image.new("RGB", (60, 30), (230, 230, 230))
