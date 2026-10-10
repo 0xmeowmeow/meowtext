@@ -86,6 +86,10 @@ SYMBOLS: tuple[tuple[str, str], ...] = (
     ("medium ▒", "▒"),
     ("heavy ▓", "▓"),
     ("block █", "█"),
+    ("upper ▀", "▀"),
+    ("lower ▄", "▄"),
+    ("left ▌", "▌"),
+    ("right ▐", "▐"),
     ("dot ·", "·"),
     ("bullet •", "•"),
     ("star *", "*"),
@@ -94,8 +98,30 @@ SYMBOLS: tuple[tuple[str, str], ...] = (
     ("circle ○", "○"),
     ("disc ●", "●"),
     ("square □", "□"),
+    ("box ■", "■"),
+    ("diamond ◆", "◆"),
+    ("lozenge ◇", "◇"),
+    ("triangle ▲", "▲"),
+    ("heart ♥", "♥"),
+    ("star ★", "★"),
+    ("spark ✦", "✦"),
     ("slash ╱", "╱"),
+    ("backslash ╲", "╲"),
+    ("cross ✕", "✕"),
     ("tilde ~", "~"),
+    ("line ─", "─"),
+    ("bar │", "│"),
+    ("double ═", "═"),
+    ("heavy ━", "━"),
+    ("corner ┌", "┌"),
+    ("round ╭", "╭"),
+    ("braille ⠁", "⠁"),
+    ("braille ⣿", "⣿"),
+    ("braille ⠿", "⠿"),
+    ("shade ▁", "▁"),
+    ("shade ▃", "▃"),
+    ("shade ▅", "▅"),
+    ("shade ▇", "▇"),
 )
 
 OUTLINE_MODES: tuple[tuple[str, str], ...] = (
@@ -114,6 +140,66 @@ ANIMATIONS: tuple[tuple[str, str], ...] = (
     ("Pulse", "pulse"),
     ("Sparkle", "sparkle"),
     ("Scan", "scan"),
+    ("Trace", "trace"),
+)
+
+TRACE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("Around the outline", "outline"),
+    ("Across the rows", "rows"),
+    ("One letter, then the next", "letter"),
+    ("Out from the centre", "centre"),
+)
+
+TRACE_REVEALS: tuple[tuple[str, str], ...] = (
+    ("Draw on", "draw"),
+    ("Runner", "runner"),
+)
+
+ANIM_DIRECTIONS: tuple[tuple[str, str], ...] = (
+    ("Forward", "forward"),
+    ("Backward", "backward"),
+    ("Ping-pong", "pingpong"),
+)
+
+ANIM_LAYERS: tuple[tuple[str, str], ...] = (
+    ("Everything", "all"),
+    ("Letters", "letters"),
+    ("Outline", "outline"),
+    ("Colour roles", "roles"),
+)
+
+ANIM_SPEEDS: tuple[tuple[str, str], ...] = (
+    ("Slow", "0.5"),
+    ("Steady", "1"),
+    ("Brisk", "2"),
+    ("Fast", "3"),
+)
+
+ANIM_TRAVELS: tuple[tuple[str, str], ...] = (
+    ("A little", "60"),
+    ("A quarter", "90"),
+    ("Halfway", "180"),
+    ("The whole way", "360"),
+)
+
+OUTLINE_PLACES: tuple[tuple[str, str], ...] = (
+    ("Outside and inside", "both"),
+    ("Outside", "outside"),
+    ("Inside the holes", "inside"),
+)
+
+OUTLINE_SCOPES: tuple[tuple[str, str], ...] = (
+    ("Whole word", "word"),
+    ("Each letter", "letter"),
+)
+
+OUTLINE_DISTANCES: tuple[tuple[str, str], ...] = (
+    ("Auto", "0"),
+    ("1 cell", "1"),
+    ("2 cells", "2"),
+    ("3 cells", "3"),
+    ("4 cells", "4"),
+    ("6 cells", "6"),
 )
 
 # Box-drawing sets for outlines that follow the letter shape.
@@ -153,11 +239,23 @@ class BannerStyle:
 
     gradient: str | None = None
     direction: str = "horizontal"
+    stops: tuple[Color, ...] | None = None
+    bands: bool = False
     outline: bool = False
     outline_char: str = "░"
     outline_color: Color = DEFAULT_OUTLINE
     outline_mode: str = "shade"
     outline_gradient: str | None = None
+    outline_stops: tuple[Color, ...] | None = None
+    outline_direction: str = "horizontal"
+    outline_speed: float = 1.0
+    outline_bands: bool = False
+    outline_sides: str = "tblr"
+    outline_distance: int = 0
+    outline_place: str = "both"
+    outline_scope: str = "word"
+    outline_dx: int = 0
+    outline_dy: int = 0
     shadow: bool = False
     shadow_dx: int = 1
     shadow_dy: int = 1
@@ -166,6 +264,22 @@ class BannerStyle:
     hue: float = 0.0
 
     def clone(self) -> BannerStyle:
+        return replace(self)
+
+
+@dataclass(slots=True)
+class Animation:
+    """One preview motion. Save stores the frame on screen, plus these settings."""
+
+    name: str = "none"
+    speed: float = 1.0
+    direction: str = "forward"
+    travel: int = 360
+    layers: str = "all"
+    pattern: str = "outline"
+    reveal: str = "draw"
+
+    def clone(self) -> Animation:
         return replace(self)
 
 
@@ -202,21 +316,33 @@ def apply_style(
     style: BannerStyle,
     phase: float = 0.0,
     pulse: float = 1.0,
+    outline_phase: float | None = None,
 ) -> Grid:
     result = grid
     if style.gradient:
-        result = gradient(result, resolve_palette(style.gradient), style.direction, phase)
+        stops = style.stops if style.stops else resolve_palette(style.gradient)
+        result = gradient(result, stops, style.direction, phase, bands=style.bands)
     if style.outline:
-        stops = resolve_palette(style.outline_gradient) if style.outline_gradient else None
+        if style.outline_gradient:
+            stops = style.outline_stops if style.outline_stops else resolve_palette(style.outline_gradient)
+        else:
+            stops = None
         result = outline(
             result,
             style.outline_char[:1] or "░",
             style.outline_color,
             mode=style.outline_mode,
             stops=stops,
-            direction=style.direction,
-            phase=phase,
+            direction=style.outline_direction,
+            phase=phase if outline_phase is None else outline_phase,
             pulse=pulse,
+            bands=style.outline_bands,
+            sides=style.outline_sides,
+            distance=style.outline_distance,
+            place=style.outline_place,
+            scope=style.outline_scope,
+            shift_x=style.outline_dx,
+            shift_y=style.outline_dy,
         )
     if style.shadow:
         result = drop_shadow(
@@ -234,6 +360,7 @@ def gradient(
     stops: tuple[Color, ...],
     direction: str = "horizontal",
     phase: float = 0.0,
+    bands: bool = False,
 ) -> Grid:
     """Recolour ink. Font colours on those cells are replaced."""
 
@@ -248,7 +375,7 @@ def gradient(
                 continue
             if cell.fg_slot is not None or cell.bg_slot is not None:
                 continue
-            colour = _sample(stops, _position(x, y, width, height, direction, phase))
+            colour = _sample(stops, _position(x, y, width, height, direction, phase), bands)
             painted = cell.clone()
             if cell.char in ("", " ") and cell.bg is not None:
                 painted.bg = colour
@@ -267,56 +394,38 @@ def outline(
     direction: str = "horizontal",
     phase: float = 0.0,
     pulse: float = 1.0,
+    *,
+    bands: bool = False,
+    sides: str = "tblr",
+    distance: int = 0,
+    place: str = "both",
+    scope: str = "word",
+    shift_x: int = 0,
+    shift_y: int = 0,
 ) -> Grid:
     """Paint a rim around the ink. The rim does not cover the letters.
 
     ``shade`` and ``thick`` repeat one symbol. ``contour``, ``heavy``,
     ``double`` and ``blocks`` pick a glyph from the way the letter sits
     against that cell, so corners turn and straight edges stay straight.
+    ``sides`` is a mix of ``t``, ``b``, ``l`` and ``r``. ``place`` is
+    ``outside``, ``inside``, or ``both``. ``scope`` ``letter`` rims each
+    letter; ``word`` rims the whole banner as one shape.
     """
 
     if grid.height == 0 or grid.width == 0:
         return grid.copy()
     source = grid.copy()
     source.normalize()
-    width, height = source.width, source.height
-    margin = 2 if mode == "thick" else 1
-    ink = [[is_ink(cell) for cell in row] for row in source.rows]
-    result = Grid.blank(width + margin * 2, height + margin * 2)
-
-    def ink_at(x: int, y: int) -> bool:
-        return 0 <= x < width and 0 <= y < height and ink[y][x]
-
-    for y in range(height):
-        for x in range(width):
-            if not ink[y][x]:
-                continue
-            for dy in range(-margin, margin + 1):
-                for dx in range(-margin, margin + 1):
-                    if dx == 0 and dy == 0:
-                        continue
-                    if max(abs(dx), abs(dy)) > margin:
-                        continue
-                    nx, ny = x + dx, y + dy
-                    if ink_at(nx, ny):
-                        continue
-                    dest_x, dest_y = nx + margin, ny + margin
-                    if is_ink(result.get(dest_x, dest_y)):
-                        continue
-                    distance = max(abs(dx), abs(dy))
-                    glyph = _outline_glyph(mode, char, nx, ny, ink_at)
-                    tint = _outline_tint(
-                        colour, stops, dest_x, dest_y,
-                        width + margin * 2, height + margin * 2,
-                        direction, phase, pulse, distance,
-                    )
-                    result.set(dest_x, dest_y, Cell(glyph, tint))
-    for y, row in enumerate(source.rows):
-        for x, cell in enumerate(row):
-            if is_ink(cell):
-                result.set(x + margin, y + margin, cell.clone())
-    result.normalize()
-    return result
+    if scope == "letter":
+        return _outline_letters(
+            source, char, colour, mode, stops, direction, phase, pulse,
+            bands, sides, distance, place, shift_x, shift_y,
+        )
+    return _outline_region(
+        source, char, colour, mode, stops, direction, phase, pulse,
+        bands, sides, distance, place, shift_x, shift_y,
+    )
 
 
 def _outline_glyph(mode: str, char: str, x: int, y: int, ink_at) -> str:
@@ -359,6 +468,252 @@ def _outline_glyph(mode: str, char: str, x: int, y: int, ink_at) -> str:
     return glyphs["fill"]
 
 
+def _hstack(pieces: list[Grid]) -> Grid:
+    height = max((piece.height for piece in pieces), default=0)
+    rows: list[list[Cell]] = [[] for _ in range(height)]
+    for piece in pieces:
+        piece.normalize()
+        for y in range(height):
+            if y < piece.height:
+                rows[y].extend(cell.clone() for cell in piece.rows[y])
+            else:
+                rows[y].extend(Cell() for _ in range(piece.width))
+    grid = Grid(rows)
+    grid.normalize()
+    return grid
+
+
+def _vstack(pieces: list[Grid]) -> Grid:
+    width = max((piece.width for piece in pieces), default=0)
+    rows: list[list[Cell]] = []
+    for piece in pieces:
+        for row in piece.rows:
+            padded = [cell.clone() for cell in row]
+            if len(padded) < width:
+                padded.extend(Cell() for _ in range(width - len(padded)))
+            rows.append(padded[:width] if width else [])
+    grid = Grid(rows)
+    grid.normalize()
+    return grid
+
+
+def _margin(mode: str, distance: int) -> int:
+    if distance:
+        return max(1, min(8, distance))
+    return 2 if mode == "thick" else 1
+
+
+def _outline_letters(
+    source: Grid,
+    char: str,
+    colour: Color,
+    mode: str,
+    stops: tuple[Color, ...] | None,
+    direction: str,
+    phase: float,
+    pulse: float,
+    bands: bool,
+    sides: str,
+    distance: int,
+    place: str,
+    shift_x: int,
+    shift_y: int,
+) -> Grid:
+    """Rim each recorded letter, or each run of ink separated by a gap."""
+
+    regions = _letter_regions(source)
+    if not regions:
+        return source.copy()
+    lines: dict[int, list[Grid]] = {}
+    order: list[int] = []
+    for x0, y0, x1, y1 in regions:
+        crop = Grid(
+            [[source.get(x, y).clone() for x in range(x0, x1)] for y in range(y0, y1)]
+        )
+        crop.normalize()
+        piece = _outline_region(
+            crop, char, colour, mode, stops, direction, phase, pulse,
+            bands, sides, distance, place, shift_x, shift_y,
+        )
+        if y0 not in lines:
+            order.append(y0)
+            lines[y0] = []
+        lines[y0].append(piece)
+    stitched = [_hstack(lines[y]) for y in order]
+    if len(stitched) == 1:
+        return stitched[0]
+    return _vstack(stitched)
+
+
+def _letter_regions(source: Grid) -> list[tuple[int, int, int, int]]:
+    """Boxes around each letter. Spans win; otherwise a blank column splits a word."""
+
+    if source.spans:
+        regions = []
+        for _char, x, y, w, h in source.spans:
+            if w > 0 and h > 0:
+                regions.append((x, y, x + w, y + h))
+        if regions:
+            return regions
+    height = source.height
+    width = source.width
+    ink_col = [
+        any(is_ink(source.get(x, y)) for y in range(height))
+        for x in range(width)
+    ]
+    regions = []
+    start: int | None = None
+    for x, on in enumerate(ink_col + [False]):
+        if on and start is None:
+            start = x
+        elif not on and start is not None:
+            regions.append((start, 0, x, height))
+            start = None
+    return regions
+
+
+def _outline_region(
+    source: Grid,
+    char: str,
+    colour: Color,
+    mode: str,
+    stops: tuple[Color, ...] | None,
+    direction: str,
+    phase: float,
+    pulse: float,
+    bands: bool,
+    sides: str,
+    distance: int,
+    place: str,
+    shift_x: int,
+    shift_y: int,
+) -> Grid:
+    width, height = source.width, source.height
+    if width == 0 or height == 0:
+        return source.copy()
+    margin = _margin(mode, distance)
+    ink = [[is_ink(cell) for cell in row] for row in source.rows]
+    outside = _outside_cells(ink)
+    shaped = mode not in {"shade", "thick"}
+    pad_left = margin + max(0, -shift_x)
+    pad_top = margin + max(0, -shift_y)
+    pad_right = margin + max(0, shift_x)
+    pad_bottom = margin + max(0, shift_y)
+    canvas_w = width + pad_left + pad_right
+    canvas_h = height + pad_top + pad_bottom
+    result = Grid.blank(canvas_w, canvas_h)
+
+    def ink_at(x: int, y: int) -> bool:
+        return 0 <= x < width and 0 <= y < height and ink[y][x]
+
+    def solid_at(x: int, y: int) -> bool:
+        reach = margin - 1
+        for sy in range(y - reach, y + reach + 1):
+            for sx in range(x - reach, x + reach + 1):
+                if max(abs(sx - x), abs(sy - y)) <= reach and ink_at(sx, sy):
+                    return True
+        return False
+
+    neighbor_at = solid_at if shaped else ink_at
+    for y in range(height):
+        for x in range(width):
+            if not ink[y][x]:
+                continue
+            for dy in range(-margin, margin + 1):
+                for dx in range(-margin, margin + 1):
+                    step = max(abs(dx), abs(dy))
+                    if step == 0 or step > margin:
+                        continue
+                    if shaped and step != margin:
+                        continue
+                    nx, ny = x + dx, y + dy
+                    if ink_at(nx, ny):
+                        continue
+                    if not _rim_kept(nx, ny, dx, dy, ink, outside, place, sides):
+                        continue
+                    dest_x = nx + pad_left + shift_x
+                    dest_y = ny + pad_top + shift_y
+                    if is_ink(result.get(dest_x, dest_y)):
+                        continue
+                    glyph = _outline_glyph(mode, char, nx, ny, neighbor_at)
+                    tint = _outline_tint(
+                        colour, stops, dest_x, dest_y, canvas_w, canvas_h,
+                        direction, phase, pulse, step, mode == "thick", bands,
+                    )
+                    result.set(dest_x, dest_y, Cell(glyph, tint))
+    for y, row in enumerate(source.rows):
+        for x, cell in enumerate(row):
+            if is_ink(cell):
+                result.set(x + pad_left, y + pad_top, cell.clone())
+    result.normalize()
+    return result
+
+
+def _rim_kept(
+    x: int,
+    y: int,
+    dx: int,
+    dy: int,
+    ink: list[list[bool]],
+    outside: list[list[bool]],
+    place: str,
+    sides: str,
+) -> bool:
+    if place in {"outside", "inside"}:
+        height = len(ink)
+        width = len(ink[0]) if height else 0
+        beyond = x < 0 or y < 0 or y >= height or x >= width
+        is_outside = beyond or outside[y][x]
+        if place == "outside" and not is_outside:
+            return False
+        if place == "inside" and is_outside:
+            return False
+    if not sides:
+        return False
+    wanted = set(sides)
+    if wanted >= set("tblr"):
+        return True
+    return _on_side(dx, dy, wanted)
+
+
+def _on_side(dx: int, dy: int, sides: set[str]) -> bool:
+    """``dx, dy`` points from the letter out to the rim cell."""
+
+    if dx < 0 and abs(dx) >= abs(dy) and "l" in sides:
+        return True
+    if dx > 0 and abs(dx) >= abs(dy) and "r" in sides:
+        return True
+    if dy < 0 and abs(dy) >= abs(dx) and "t" in sides:
+        return True
+    if dy > 0 and abs(dy) >= abs(dx) and "b" in sides:
+        return True
+    return False
+
+
+def _outside_cells(ink: list[list[bool]]) -> list[list[bool]]:
+    """Empty cells a flood from the border can reach. Holes stay False."""
+
+    height = len(ink)
+    width = len(ink[0]) if height else 0
+    reached = [[False] * width for _ in range(height)]
+    stack: list[tuple[int, int]] = []
+    for y in range(height):
+        for x in range(width):
+            if y in {0, height - 1} or x in {0, width - 1}:
+                if not ink[y][x]:
+                    stack.append((x, y))
+    while stack:
+        x, y = stack.pop()
+        if reached[y][x] or ink[y][x]:
+            continue
+        reached[y][x] = True
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < width and 0 <= ny < height and not reached[ny][nx] and not ink[ny][nx]:
+                stack.append((nx, ny))
+    return reached
+
+
 def _outline_tint(
     colour: Color,
     stops: tuple[Color, ...] | None,
@@ -370,12 +725,14 @@ def _outline_tint(
     phase: float,
     pulse: float,
     distance: int,
+    darken: bool,
+    bands: bool,
 ) -> Color:
     if stops:
-        base = _sample(stops, _position(x, y, width, height, direction, phase))
+        base = _sample(stops, _position(x, y, width, height, direction, phase), bands)
     else:
         base = colour
-    if distance > 1:
+    if darken and distance > 1:
         base = Color(base.r // 2, base.g // 2, base.b // 2)
     if pulse != 1:
         base = Color(
@@ -479,10 +836,14 @@ def _position(x: int, y: int, width: int, height: int, direction: str, phase: fl
     return (base + phase) % 1.0
 
 
-def _sample(stops: tuple[Color, ...], t: float) -> Color:
+def _sample(stops: tuple[Color, ...], t: float, bands: bool = False) -> Color:
     t = min(1.0, max(0.0, t))
     if len(stops) == 1:
         return stops[0]
+    if bands:
+        if t >= 1:
+            return stops[-1]
+        return stops[min(len(stops) - 1, int(t * len(stops)))]
     scaled = t * (len(stops) - 1)
     index = min(int(scaled), len(stops) - 2)
     local = scaled - index
@@ -492,3 +853,155 @@ def _sample(stops: tuple[Color, ...], t: float) -> Color:
         int(left.g + (right.g - left.g) * local),
         int(left.b + (right.b - left.b) * local),
     )
+
+
+def motion_clock(frame: int, animation: Animation) -> float:
+    """Frames after speed and direction. Ping-pong walks out and back."""
+
+    speed = animation.speed if animation.speed > 0 else 1.0
+    step = frame * speed
+    if animation.direction == "backward":
+        return -step
+    if animation.direction == "pingpong":
+        span = 24.0
+        pos = step % (span * 2)
+        return pos if pos < span else span * 2 - pos
+    return step
+
+
+def animation_phase(clock: float, travel: int) -> tuple[float, float]:
+    """A gradient phase in 0..1, and a hue offset in degrees, both limited by ``travel``."""
+
+    travel = max(1, min(360, int(travel)))
+    span = travel / 360
+    phase = (clock % 24) / 24
+    if phase < 0:
+        phase += 1
+    phase *= span
+    hue = (clock * 12) % travel
+    if hue < 0:
+        hue += travel
+    return phase, hue
+
+
+def trace(grid: Grid, animation: Animation, frame: int) -> Grid:
+    """Reveal the banner along a path, or run a bright point along that path."""
+
+    order = _trace_order(grid, animation.pattern)
+    if not order:
+        return grid.copy()
+    clock = int(motion_clock(frame, animation))
+    if animation.reveal == "runner":
+        return _trace_runner(grid, order, clock)
+    return _trace_draw(grid, order, clock)
+
+
+def _trace_order(grid: Grid, pattern: str) -> list[tuple[int, int]]:
+    ink = [
+        (x, y)
+        for y, row in enumerate(grid.rows)
+        for x, cell in enumerate(row)
+        if is_ink(cell)
+    ]
+    if pattern == "rows":
+        return sorted(ink, key=lambda item: (item[1], item[0]))
+    if pattern == "centre":
+        cx = (grid.width - 1) / 2
+        cy = (grid.height - 1) / 2
+        return sorted(ink, key=lambda item: (abs(item[0] - cx) + abs(item[1] - cy), item[1], item[0]))
+    groups = _ink_groups(grid)
+    if pattern == "letter":
+        ordered: list[tuple[int, int]] = []
+        for group in groups:
+            ordered.extend(sorted(group, key=lambda item: (item[1], item[0])))
+        return ordered
+    ordered = []
+    for group in groups:
+        edge, inner = _perimeter(group)
+        ordered.extend(edge)
+        ordered.extend(sorted(inner, key=lambda item: (item[1], item[0])))
+    return ordered
+
+
+def _ink_groups(grid: Grid) -> list[list[tuple[int, int]]]:
+    """Letters split by a blank column, each letter's ink cells together."""
+
+    height = grid.height
+    groups: list[list[tuple[int, int]]] = []
+    current: list[tuple[int, int]] = []
+    for x in range(grid.width):
+        column = [(x, y) for y in range(height) if is_ink(grid.get(x, y))]
+        if column:
+            current.extend(column)
+        elif current:
+            groups.append(current)
+            current = []
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _perimeter(cells: list[tuple[int, int]]) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    """Walk the outer cells, then list the cells those surround."""
+
+    present = set(cells)
+    if not present:
+        return [], []
+    edge: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for x, y in cells:
+        if any((x + dx, y + dy) not in present for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+            edge.append((x, y))
+            seen.add((x, y))
+    edge.sort(key=lambda item: (item[1], item[0]))
+    start = edge[0]
+    walked = [start]
+    walked_set = {start}
+    current = start
+    # Clockwise-ish: prefer the next edge cell that continues the walk.
+    for _ in range(len(edge)):
+        x, y = current
+        nxt = None
+        for dx, dy in ((1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)):
+            candidate = (x + dx, y + dy)
+            if candidate in seen and candidate not in walked_set:
+                nxt = candidate
+                break
+        if nxt is None:
+            break
+        walked.append(nxt)
+        walked_set.add(nxt)
+        current = nxt
+    leftover = [cell for cell in edge if cell not in walked_set]
+    inner = [cell for cell in cells if cell not in seen]
+    return walked + leftover, inner
+
+
+def _trace_draw(grid: Grid, order: list[tuple[int, int]], clock: int) -> Grid:
+    shown = set(order[: max(0, clock + 1)])
+    out = grid.copy()
+    for y, row in enumerate(out.rows):
+        for x, cell in enumerate(row):
+            if is_ink(cell) and (x, y) not in shown:
+                row[x] = Cell()
+    return out
+
+
+def _trace_runner(grid: Grid, order: list[tuple[int, int]], clock: int) -> Grid:
+    hot: dict[tuple[int, int], int] = {}
+    for age in range(4):
+        hot[order[(clock - age) % len(order)]] = age
+    out = grid.copy()
+    for (x, y), age in hot.items():
+        cell = out.get(x, y)
+        if cell.fg is None:
+            continue
+        gain = 1.8 - age * 0.25
+        bright = cell.clone()
+        bright.fg = Color(
+            min(255, int(cell.fg.r * gain)),
+            min(255, int(cell.fg.g * gain)),
+            min(255, int(cell.fg.b * gain)),
+        )
+        out.set(x, y, bright)
+    return out

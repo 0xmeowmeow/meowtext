@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -90,6 +91,45 @@ class GridTests(unittest.TestCase):
         still = apply_style(Grid([[Cell("X") for _ in range(6)]]), BannerStyle(gradient="rainbow"), phase=0)
         moved = apply_style(Grid([[Cell("X") for _ in range(6)]]), BannerStyle(gradient="rainbow"), phase=0.4)
         self.assertNotEqual(still.get(0, 0).fg, moved.get(0, 0).fg)
+
+    def test_outline_can_choose_a_side_a_hole_and_each_letter(self) -> None:
+        left = outline(Grid([[Cell("#")]]), "#", Color(1, 2, 3), sides="l")
+        self.assertEqual(left.get(0, 1).char, "#")
+        self.assertEqual(left.get(2, 1).char, " ")
+        self.assertEqual(left.get(1, 1).char, "#")
+        ring = Grid(
+            [
+                [Cell("#"), Cell("#"), Cell("#")],
+                [Cell("#"), Cell(), Cell("#")],
+                [Cell("#"), Cell("#"), Cell("#")],
+            ]
+        )
+        inside = outline(ring, "#", Color(4, 5, 6), place="inside")
+        self.assertEqual(inside.get(2, 2).char, "#")
+        self.assertEqual(inside.get(2, 2).fg, Color(4, 5, 6))
+        self.assertFalse(is_ink(inside.get(0, 0)))
+        outside = outline(ring, "#", Color(4, 5, 6), place="outside")
+        self.assertTrue(is_ink(outside.get(0, 0)))
+        self.assertFalse(is_ink(outside.get(2, 2)))
+        letters = Grid([[Cell("A"), Cell(), Cell("B")]])
+        letters.spans = (("A", 0, 0, 1, 1), ("B", 2, 0, 1, 1))
+        apart = outline(letters, "#", Color(1, 1, 1), scope="letter")
+        self.assertEqual(apart.width, 6)
+        self.assertIn("A", to_plain(apart))
+        self.assertIn("B", to_plain(apart))
+
+    def test_gradient_bands_and_a_trace_that_draws_on(self) -> None:
+        from meowtext.effects import Animation, trace
+
+        stops = (Color(255, 0, 0), Color(0, 0, 255))
+        banded = gradient(Grid([[Cell("X") for _ in range(4)]]), stops, bands=True)
+        self.assertEqual(banded.get(0, 0).fg, Color(255, 0, 0))
+        self.assertEqual(banded.get(3, 0).fg, Color(0, 0, 255))
+        row = Grid([[Cell("A", Color(10, 10, 10)), Cell("B", Color(10, 10, 10)), Cell("C", Color(10, 10, 10))]])
+        drawn = trace(row, Animation(pattern="rows", reveal="draw"), 0)
+        self.assertEqual(drawn.get(0, 0).char, "A")
+        self.assertEqual(drawn.get(1, 0).char, " ")
+        self.assertEqual(drawn.get(2, 0).char, " ")
 
 
 class TdfTests(unittest.TestCase):
@@ -231,6 +271,46 @@ class RelationTests(unittest.TestCase):
         )
         self.assertEqual(role_place(grid, 4), (1, "ink"))
         self.assertEqual(role_place(grid, 3), (1, "background"))
+
+
+class ProjectTests(unittest.TestCase):
+    def test_project_round_trip_and_a_name_that_does_not_overwrite(self) -> None:
+        from meowtext.project import Project, allocate_path, load_project, project_filename, save_project
+
+        project = Project(text="Hi", font_name="small", notes="remember the ice", style=BannerStyle(gradient="ice", outline=True))
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            first = allocate_path(directory, project_filename("Hi", "small"))
+            save_project(first, project)
+            taken = directory / project_filename("Hi", "small")
+            taken.write_text("keep", encoding="utf-8")
+            second = allocate_path(directory, project_filename("Hi", "small"))
+            save_project(second, project)
+            self.assertEqual(taken.read_text(encoding="utf-8"), "keep")
+            self.assertNotEqual(first, second)
+            loaded = load_project(second)
+        self.assertEqual(loaded.text, "Hi")
+        self.assertEqual(loaded.notes, "remember the ice")
+        self.assertEqual(loaded.style.gradient, "ice")
+        self.assertTrue(loaded.style.outline)
+
+    def test_colour_copies_share_a_row_and_sizes_stay_separate(self) -> None:
+        from meowtext.catalog import FontInfo, group_fonts
+
+        fonts = [
+            FontInfo("tdf", "Nuclear Blue", "a.tdf", 0, "color"),
+            FontInfo("tdf", "Nuclear Cyan", "a.tdf", 1, "color"),
+            FontInfo("tdf", "CyberLarge", "b.tdf", 0, "color"),
+            FontInfo("tdf", "CyberSmall", "b.tdf", 1, "color"),
+            FontInfo("tdf", "Block", "c.tdf", 0, "block"),
+        ]
+        families = group_fonts(fonts)
+        nuclear = next(family for family in families if family.stem == "Nuclear")
+        self.assertEqual(len(nuclear.members), 2)
+        stems = {family.stem for family in families}
+        self.assertIn("CyberLarge", stems)
+        self.assertIn("CyberSmall", stems)
+        self.assertEqual(families[0].kind, "block")
 
 
 class ToolTests(unittest.TestCase):

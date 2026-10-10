@@ -139,8 +139,10 @@ def tighten(grid: Grid) -> Grid:
     """
 
     rows = [list(row) for row in grid.rows]
+    dropped = 0
     while rows and all(is_empty(cell) for cell in rows[0]):
         rows.pop(0)
+        dropped += 1
     while rows and all(is_empty(cell) for cell in rows[-1]):
         rows.pop()
     if not rows:
@@ -159,4 +161,15 @@ def tighten(grid: Grid) -> Grid:
         if len(row) < width:
             row.extend(Cell() for _ in range(width - len(row)))
         trimmed.append(row)
-    return Grid(trimmed)
+    result = Grid(trimmed)
+    spans: list[tuple[str, int, int, int, int]] = []
+    for char, x, y, w, h in grid.spans:
+        top = y - dropped
+        if x >= width or top >= result.height:
+            continue
+        kept_w = min(w, width - x)
+        kept_h = min(h, result.height - max(top, 0))
+        if kept_w > 0 and kept_h > 0:
+            spans.append((char, x, max(top, 0), kept_w, kept_h))
+    result.spans = tuple(spans)
+    return result

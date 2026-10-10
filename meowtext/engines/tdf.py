@@ -176,7 +176,8 @@ def render_font(font: TdfFont, text: str) -> tuple[Grid, tuple[str, ...], bool]:
             if char not in missing:
                 missing.append(char)
         folded = folded or line_folded
-    return _vstack(rendered, font.line_height), tuple(missing), folded
+    stacked = _vstack(rendered, font.line_height)
+    return stacked, tuple(missing), folded
 
 
 def _render_line(font: TdfFont, line: str) -> tuple[Grid, list[str], bool]:
@@ -198,13 +199,17 @@ def _render_line(font: TdfFont, line: str) -> tuple[Grid, list[str], bool]:
     width = sum(glyph.width for glyph in glyphs) + spacing * max(len(glyphs) - 1, 0)
     grid = Grid.blank(width, body_h + desc_h)
     x = 0
+    spans: list[tuple[str, int, int, int, int]] = []
+    line_height = body_h + desc_h
     for index, glyph in enumerate(glyphs):
+        spans.append((line[index], x, 0, glyph.width, line_height))
         # Shorter letters sit on the same baseline as the tallest body.
         _blit(grid, glyph.body, x, body_h - len(glyph.body))
         _blit(grid, glyph.desc, x, body_h)
         x += glyph.width
         if index != len(glyphs) - 1:
             x += spacing
+    grid.spans = tuple(spans)
     return grid, missing, folded
 
 
@@ -251,14 +256,21 @@ def _vstack(grids: list[Grid], empty_height: int) -> Grid:
         return Grid()
     width = max((grid.width for grid in grids), default=0)
     rows: list[list[Cell]] = []
+    spans: list[tuple[str, int, int, int, int]] = []
+    y = 0
     for grid in grids:
         block = grid.rows or Grid.blank(width, empty_height).rows
+        for char, x, sy, w, h in grid.spans:
+            spans.append((char, x, y + sy, w, h))
         for row in block:
             padded = list(row)
             if len(padded) < width:
                 padded.extend(Cell() for _ in range(width - len(padded)))
             rows.append(padded[:width] if width else [])
-    return Grid(rows)
+        y += len(block)
+    stacked = Grid(rows)
+    stacked.spans = tuple(spans)
+    return stacked
 
 
 def _walk_headers(data: bytes) -> list[tuple[str, str, int]]:

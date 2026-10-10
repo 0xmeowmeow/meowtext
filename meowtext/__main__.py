@@ -28,6 +28,11 @@ _SUFFIXES = {
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    project: Path | None = None
+    if len(argv) == 1 and argv[0].endswith(".meowtext") and not argv[0].startswith("-"):
+        project = Path(argv[0])
+        argv = []
     parser = argparse.ArgumentParser(
         prog="meowtext",
         description="Decorate text with FIGlet, TOIlet, and TheDraw fonts.",
@@ -65,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     fonts.add_argument("-e", "--engine", default="figlet")
     fonts.add_argument("-q", "--query", default="")
     fonts.add_argument("-n", "--limit", type=int, default=200)
+    fonts.add_argument("--fetch", action="store_true", help="download extra FIGlet and TOIlet fonts")
 
     args = parser.parse_args(argv)
     try:
@@ -72,9 +78,11 @@ def main(argv: list[str] | None = None) -> int:
             return _render(args)
         if args.command == "fonts":
             return _fonts(args)
+        from meowtext.project import load_project
         from meowtext.tui import MeowText
 
-        MeowText().run()
+        opened = load_project(project) if project is not None else None
+        MeowText(opened).run()
         return 0
     except MeowTextError as exc:
         print(f"meowtext: {exc}", file=sys.stderr)
@@ -148,6 +156,12 @@ def _style_from_args(args: argparse.Namespace) -> BannerStyle:
 
 
 def _fonts(args: argparse.Namespace) -> int:
+    if args.fetch:
+        from meowtext.fonts_extra import fetch_extra_fonts
+
+        added = fetch_extra_fonts()
+        print(f"extra fonts ready ({added} new)")
+        return 0
     engine = canonical(args.engine)
     query = args.query.lower()
     shown = 0

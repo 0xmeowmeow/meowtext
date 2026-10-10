@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -61,10 +62,88 @@ def canonical(engine: str) -> str:
 def list_fonts(engine: str) -> list[FontInfo]:
     key = canonical(engine)
     if key == "figlet":
-        return [FontInfo("figlet", name, name, 0, "flf") for name in figlet.font_names()]
+        return [
+            FontInfo("figlet", name, str(path), 0, "flf")
+            for name, path in sorted(figlet.font_index().items())
+        ]
     if key == "toilet":
-        return [FontInfo("toilet", name, name, 0, "tlf") for name in toilet.font_names()]
+        return [
+            FontInfo("toilet", name, str(path), 0, "tlf")
+            for name, path in sorted(toilet.font_index().items())
+        ]
     return load_tdf()
+
+
+@dataclass(frozen=True, slots=True)
+class FontFamily:
+    """One row in the font list. Colour copies of a TheDraw font share a row."""
+
+    key: str
+    kind: str
+    stem: str
+    members: tuple[FontInfo, ...]
+
+    def label(self) -> str:
+        if len(self.members) == 1:
+            text = self.members[0].label()
+        else:
+            text = f"{self.stem} · {len(self.members)} colours"
+        if len(text) > 42:
+            return text[:41] + "…"
+        return text
+
+
+_COLOUR_WORD = (
+    "blue|blu|brown|brow|brn|cyan|cya|cyn|green|grn|gray|grey|gra|"
+    "gold|gld|purple|purp|pur|red|yellow|yel|white|wht|black|blk|"
+    "pink|orange|org|magenta|margen|marge|marg"
+)
+_COLOUR_SUFFIX = re.compile(
+    rf"(?ix)(?:[\s_\-]+|(?<=[a-z])(?=[A-Z]))"
+    rf"(?:(?:dk|drk|dark|lt|light|d)(?=[A-Za-z]))?"
+    rf"(?:{_COLOUR_WORD})$"
+)
+_KIND_ORDER = {"block": 0, "outline": 1, "color": 2}
+
+
+def colour_stem(name: str) -> str | None:
+    """The shared name of a colour copy, such as ``Nuclear`` from ``Nuclear Blue``."""
+
+    match = _COLOUR_SUFFIX.search(name)
+    if match is None:
+        return None
+    stem = name[: match.start()].strip(" _-")
+    if len(stem) < 2:
+        return None
+    return stem
+
+
+def group_fonts(fonts: list[FontInfo]) -> list[FontFamily]:
+    """Collapse TheDraw colour copies. Size copies stay as their own rows."""
+
+    if not fonts or fonts[0].engine != "tdf":
+        return [FontFamily(font.id, font.kind, font.name, (font,)) for font in fonts]
+    buckets: dict[tuple[str, str], list[tuple[str, FontInfo]]] = defaultdict(list)
+    alone: list[FontInfo] = []
+    for font in fonts:
+        stem = colour_stem(font.name)
+        if stem is None:
+            alone.append(font)
+            continue
+        buckets[(font.kind, stem.lower())].append((stem, font))
+    families: list[FontFamily] = [
+        FontFamily(font.id, font.kind, font.name, (font,)) for font in alone
+    ]
+    for (kind, key), items in buckets.items():
+        if len({font.name for _, font in items}) < 2:
+            _, font = items[0]
+            families.append(FontFamily(font.id, kind, font.name, (font,)))
+            continue
+        stem = items[0][0]
+        members = tuple(font for _, font in sorted(items, key=lambda item: item[1].name.lower()))
+        families.append(FontFamily(f"family\x1f{kind}\x1f{key}", kind, stem, members))
+    families.sort(key=lambda family: (_KIND_ORDER.get(family.kind, 9), family.stem.lower()))
+    return families
 
 
 def tdf_ready() -> bool:
@@ -147,6 +226,46 @@ def resolve(engine: str, query: str) -> FontInfo:
     if not partial:
         raise RenderError(f"no {key} font matching {query!r}")
     raise RenderError(_ambiguous(query, partial))
+
+
+_SPAN_CACHE: OrderedDict[tuple[str, str], tuple[tuple[str, int, int, int, int], ...]] = OrderedDict()
+
+
+def measure_spans(font: FontInfo, text: str) -> tuple[tuple[str, int, int, int, int], ...]:
+    """Where each letter sits. Used when an outline goes around each letter.
+
+    TheDraw already records this while rendering. FIGlet and TOIlet report
+    it by measuring how the line grows, once per banner, and only when asked.
+    """
+
+    if font.engine == "tdf" or len(text) > 40:
+        return ()
+    key = (font.id, text)
+    cached = _SPAN_CACHE.get(key)
+    if cached is not None:
+        _SPAN_CACHE.move_to_end(key)
+        return cached
+    spans: list[tuple[str, int, int, int, int]] = []
+    y = 0
+    for line in text.split("\n"):
+        if line == "":
+            y += 1
+            continue
+        previous = 0
+        height = 1
+        for index, char in enumerate(line):
+            drawn = render(font, line[: index + 1])
+            width = drawn.grid.width
+            height = drawn.grid.height or 1
+            start = min(previous, width)
+            spans.append((char, start, y, max(1, width - start), height))
+            previous = width
+        y += height
+    stored = tuple(spans)
+    _SPAN_CACHE[key] = stored
+    while len(_SPAN_CACHE) > 64:
+        _SPAN_CACHE.popitem(last=False)
+    return stored
 
 
 def render(font: FontInfo, text: str) -> EngineOutput:

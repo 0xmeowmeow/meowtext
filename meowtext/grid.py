@@ -124,6 +124,8 @@ class Grid:
     def __init__(self, rows: list[list[Cell]] | None = None) -> None:
         self.rows: list[list[Cell]] = rows or []
         self.palette: object | None = None
+        # (char, x, y, width, height) for each letter, when the renderer recorded them.
+        self.spans: tuple[tuple[str, int, int, int, int], ...] = ()
 
     @classmethod
     def blank(cls, width: int, height: int) -> Grid:
@@ -163,6 +165,7 @@ class Grid:
     def copy(self) -> Grid:
         copied = Grid([[cell.clone() for cell in row] for row in self.rows])
         copied.palette = self.palette
+        copied.spans = self.spans
         return copied
 
     def __eq__(self, other: object) -> bool:
