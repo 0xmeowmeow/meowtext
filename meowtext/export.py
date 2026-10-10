@@ -30,14 +30,14 @@ _MIRC: tuple[Color, ...] = (
     Color(210, 210, 210),
 )
 
-FORMATS = ("ansi", "plain", "html", "json", "png", "kitty", "irc")
+FORMATS = ("ansi", "plain", "html", "json", "png", "kitty", "irc", "markdown")
 
 _MONO_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 
 
 def export(grid: Grid, fmt: str) -> str | bytes:
     key = fmt.lower().lstrip(".")
-    aliases = {"ans": "ansi", "txt": "plain", "htm": "html"}
+    aliases = {"ans": "ansi", "txt": "plain", "htm": "html", "md": "markdown"}
     key = aliases.get(key, key)
     writers = {
         "ansi": to_ansi,
@@ -47,6 +47,7 @@ def export(grid: Grid, fmt: str) -> str | bytes:
         "png": to_png,
         "kitty": to_kitty,
         "irc": to_irc,
+        "markdown": to_markdown,
     }
     if key not in writers:
         known = ", ".join(FORMATS)
@@ -58,6 +59,14 @@ def to_plain(grid: Grid) -> str:
     return "\n".join("".join(cell.char or " " for cell in row) for row in grid.rows) + (
         "\n" if grid.rows else ""
     )
+
+
+def to_markdown(grid: Grid) -> str:
+    text = to_plain(grid)
+    import re
+    length = max([2] + [len(m.group()) for m in re.finditer(r"`+", text)]) + 1
+    fence = "`" * length
+    return f"{fence}text\n{text}{fence}\n"
 
 
 def to_ansi(grid: Grid) -> str:
@@ -263,7 +272,7 @@ def to_kitty(grid: Grid) -> str:
     for offset in range(0, max(len(payload), 1), step):
         piece = payload[offset : offset + step]
         more = 1 if offset + step < len(payload) else 0
-        control = f"a=T,f=100,m={more}" if offset == 0 else f"m={more}"
+        control = f"a=T,f=100,q=2,m={more}" if offset == 0 else f"m={more}"
         parts.append(f"\x1b_G{control};{piece}\x1b\\")
     return "".join(parts)
 

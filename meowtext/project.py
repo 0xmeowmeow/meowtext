@@ -35,6 +35,7 @@ class Project:
     notes: str = ""
     patches: tuple[tuple[int, int, Cell], ...] = ()
     letters: dict[str, Grid] = field(default_factory=dict)
+    role_splits: tuple[int, ...] = ()
 
 
 def project_filename(text: str, font_name: str) -> str:
@@ -76,8 +77,12 @@ def load_project(path: Path) -> Project:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RenderError(f"could not read {path.name}") from exc
+    return project_from_dict(document, path.name)
+
+
+def project_from_dict(document: object, name: str = "project") -> Project:
     if not isinstance(document, dict) or document.get("meowtext") != "project":
-        raise RenderError(f"{path.name} is not a meowtext project")
+        raise RenderError(f"{name} is not a meowtext project")
     version = document.get("version")
     if version != PROJECT_VERSION:
         raise RenderError(f"unsupported meowtext project version: {version!r}")
@@ -96,6 +101,7 @@ def load_project(path: Path) -> Project:
         notes=str(document.get("notes") or ""),
         patches=_patches_from(document.get("patches") or []),
         letters=_letters_from(document.get("letters") or {}),
+        role_splits=tuple(int(slot) for slot in document.get("role_splits") or ()),
     )
 
 
@@ -123,6 +129,7 @@ def dumps_project(project: Project) -> str:
         "notes": project.notes,
         "patches": [_patch_to(x, y, cell) for x, y, cell in project.patches],
         "letters": {char: _grid_to(grid) for char, grid in project.letters.items()},
+        "role_splits": list(project.role_splits),
     }
     return json.dumps(document, ensure_ascii=False, indent=2) + "\n"
 
@@ -159,6 +166,7 @@ def _style_to(style: BannerStyle) -> dict:
         "shadow_color": style.shadow_color.hex(),
         "shadow_char": style.shadow_char,
         "hue": style.hue,
+        "recolour_roles": style.recolour_roles,
     }
     return payload
 
@@ -193,6 +201,7 @@ def _style_from(raw: dict) -> BannerStyle:
     shadow_char = raw.get("shadow_char")
     style.shadow_char = None if not shadow_char else str(shadow_char)[:1]
     style.hue = float(raw.get("hue") or 0)
+    style.recolour_roles = bool(raw.get("recolour_roles", False))
     return style
 
 

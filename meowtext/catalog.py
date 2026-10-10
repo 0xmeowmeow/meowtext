@@ -17,6 +17,7 @@ from meowtext.grid import Grid
 
 _ALIASES = {"thedraw": "tdf", "thedrawfonts": "tdf", "tdfiglet": "tdf"}
 _LOCK = threading.Lock()
+_PARSED_LOCK = threading.Lock()
 _TDF: list[FontInfo] | None = None
 _PARSED: OrderedDict[str, list[tdf_engine.TdfFont]] = OrderedDict()
 
@@ -284,14 +285,16 @@ def render(font: FontInfo, text: str) -> EngineOutput:
 
 def _parsed_file(path: Path) -> list[tdf_engine.TdfFont]:
     key = str(path)
-    cached = _PARSED.get(key)
-    if cached is not None:
-        _PARSED.move_to_end(key)
-        return cached
+    with _PARSED_LOCK:
+        cached = _PARSED.get(key)
+        if cached is not None:
+            _PARSED.move_to_end(key)
+            return cached
     fonts = tdf_engine.load_file(path)
-    _PARSED[key] = fonts
-    while len(_PARSED) > 32:
-        _PARSED.popitem(last=False)
+    with _PARSED_LOCK:
+        _PARSED[key] = fonts
+        while len(_PARSED) > 32:
+            _PARSED.popitem(last=False)
     return fonts
 
 

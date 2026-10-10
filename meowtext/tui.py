@@ -1,16 +1,23 @@
-"""Textual frontend. The banner engine does not depend on this module."""
+"""Textual frontend. The banner engine does not depend on this module.
+
+The settings are one grid under the banner, not a form. The highlighted
+setting changes with the left and right arrows. A letter shown on a row
+changes that setting immediately. 1 through 6 change section. Fonts stay
+hidden until Ctrl+F: type a search, and up and down walk the matches.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from rich.text import Text
+from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, ScrollableContainer, Vertical, VerticalScroll
-from textual.widgets import Button, Footer, Header, Input, Label, OptionList, Select, Static, Switch, TextArea
-from textual.widgets.option_list import Option
+from textual.containers import Horizontal, ScrollableContainer, Vertical
+from textual.widgets import Button, Footer, Header, Input, Static, TextArea
 
+from meowtext.board import Board, Knob
 from meowtext.catalog import FontFamily, FontInfo, group_fonts, list_fonts, load_tdf, measure_spans, tdf_ready
 from meowtext.compose import Banner, layout_font, present
 from meowtext.effects import (
@@ -22,11 +29,12 @@ from meowtext.effects import (
     COLOURS,
     DEFAULT_OUTLINE,
     DEFAULT_SHADOW,
+    GRADIENT_DIRECTIONS,
+    OUTLINE_DIRECTIONS,
     OUTLINE_DISTANCES,
     OUTLINE_MODES,
     OUTLINE_PLACES,
     OUTLINE_SCOPES,
-    PRESETS,
     TRACE_PATTERNS,
     TRACE_REVEALS,
     Animation,
@@ -36,20 +44,9 @@ from meowtext.effects import (
 from meowtext.errors import RenderError
 from meowtext.export import export
 from meowtext.grid import Cell, Color, Grid
-from meowtext.packs import (
-    list_favourites,
-    load_favourite,
-    load_palettes,
-    load_presets,
-    load_symbols,
-    save_favourite,
-    save_palette,
-    save_preset,
-    save_symbol,
-)
-from meowtext.palette import RelationPalette, hsv_to_rgb, rgb_to_hsv, role_place, used_slots
+from meowtext.packs import list_favourites, load_favourite, load_palettes, load_presets, load_symbols, save_favourite
+from meowtext.palette import RelationPalette, hsv_to_rgb, rgb_to_hsv, used_slots
 from meowtext.project import Project, allocate_path, load_project, project_filename, roles_from_palette, save_project
-from meowtext.widgets import Cycle
 
 _SUFFIX = {
     "ansi": ".ans",
@@ -60,26 +57,68 @@ _SUFFIX = {
     "kitty": ".kitty",
     "irc": ".irc",
 }
-_SECTIONS = ("look", "outline", "shadow", "colour", "animate", "notes")
-_SECTION_OPTIONS = (
-    ("Look", "look"),
-    ("Outline", "outline"),
-    ("Shadow", "shadow"),
-    ("Colour", "colour"),
-    ("Animate", "animate"),
-    ("Notes", "notes"),
+_SECTIONS = (
+    ("look", "Look"),
+    ("outline", "Outline"),
+    ("shadow", "Shadow"),
+    ("colour", "Colour"),
+    ("animate", "Animate"),
+    ("notes", "Notes"),
 )
-_KINDS = (("block", "Block"), ("outline", "Outline"), ("color", "Colour"))
+_ON = (("On", "on"), ("Off", "off"))
+_SIDES = (
+    ("all four", "tblr"),
+    ("top and bottom", "tb"),
+    ("left and right", "lr"),
+    ("top", "t"),
+    ("bottom", "b"),
+    ("left", "l"),
+    ("right", "r"),
+    ("none", "none"),
+)
+_FORMATS = (
+    ("ANSI", "ansi"),
+    ("Plain", "plain"),
+    ("HTML", "html"),
+    ("JSON", "json"),
+    ("PNG", "png"),
+    ("Kitty", "kitty"),
+    ("IRC", "irc"),
+)
+_ENGINES = (("FIGlet", "figlet"), ("TOIlet", "toilet"), ("TheDraw", "tdf"))
 _PAINT_COLOURS = ("keep",) + tuple(COLOURS)
+_NUMBERS = {
+    "hue": 15,
+    "stop-h": 15,
+    "role-h": 15,
+    "stop-s": 5,
+    "stop-v": 5,
+    "role-s": 5,
+    "role-v": 5,
+    "odx": 1,
+    "ody": 1,
+    "dx": 1,
+    "dy": 1,
+}
 
 
-def to_rich(grid: Grid, focus: int | None = None, cursor: tuple[int, int] | None = None) -> Text:
-    """Draw the banner. ``focus`` leaves one colour role bright and dims the rest."""
+def to_rich(
+    grid: Grid,
+    focus: int | None = None,
+    cursor: tuple[int, int] | None = None,
+    offset: tuple[int, int] = (0, 0),
+) -> Text:
+    """Draw the banner. ``offset`` is blank space so the letters sit in the middle."""
 
     text = Text()
     if not grid.rows:
         return text
+    across, down = offset
+    if down:
+        text.append("\n" * down)
     for y, row in enumerate(grid.rows):
+        if across:
+            text.append(" " * across)
         for x, cell in enumerate(row):
             chosen = focus is None or cell.fg_slot == focus or cell.bg_slot == focus
             fg = cell.fg if chosen else _dim(cell.fg)
@@ -106,7 +145,7 @@ def _dim(color: Color | None) -> Color | None:
 
 
 class BannerView(Static):
-    """The preview. It can take focus while you paint, so the arrows stay on the banner."""
+    """The preview. It takes the keys while you are painting."""
 
     can_focus = True
 
@@ -115,43 +154,43 @@ class MeowText(App):
     """Type a line, pick a font, decorate it, and export the banner."""
 
     TITLE = "meowtext"
-    SUB_TITLE = "left and right cycle a control"
+    SUB_TITLE = "letter changes it · shift+letter back · arrows move · 1–6 section · ctrl-f fonts"
     CSS = """
     Screen { background: #101114; }
-    #text { width: 1fr; }
-    #engine { width: 24; }
-    #middle { height: 1fr; }
-    #side { width: 36; height: 1fr; border-right: solid #2c3038; }
-    #filter { margin: 0; }
-    #variant { height: 1; padding: 0 1; }
-    #font-list { height: 1fr; border: none; padding: 0; }
-    #stage { width: 1fr; height: 1fr; }
-    #inspector { width: 46; height: 1fr; border-left: solid #2c3038; background: #181a20; }
-    #section { height: 1; padding: 0 1; background: #22262e; }
-    .page { height: 1fr; padding: 0 1; }
-    Cycle { height: 1; width: 1fr; }
-    #meta, #paint-bar { height: 1; padding: 0 1; color: #9aa1ab; background: #101114; }
-    #stage-scroll { height: 1fr; background: #000; border: solid #2c3038; }
-    #preview { width: auto; height: auto; padding: 1 2; background: #000; color: #e8e6e3; }
-    .toolbar { height: auto; padding: 0 1; background: #181a20; }
-    Label.tag { width: auto; height: 1; padding: 0 1 0 0; color: #c4c8d0; }
-    #dx, #dy, #odx, #ody, #hue, #role-h, #role-s, #role-v, #stop-h, #stop-s, #stop-v { width: 8; }
-    #role { width: 1fr; }
-    #path, #palette-name, #preset-name, #custom-symbol { width: 1fr; }
-    #notes { height: 1fr; }
-    #favourites { height: 8; }
-    Button { margin: 0 1 0 0; }
+    #text { width: 1fr; height: 1; }
+    #fonts { height: auto; width: 100%; background: #181a20; }
+    #filter { width: 100%; height: 1; }
+    #matches { height: auto; max-height: 6; padding: 0 1; color: #d7dbe2; background: #181a20; }
+    #stage { width: 100%; height: 1fr; }
+    #meta, #paint-bar { height: 1; padding: 0 1; color: #9aa1ab; }
+    #stage-scroll { width: 100%; height: 1fr; background: #000; }
+    #preview { width: auto; height: auto; background: #000; color: #e8e6e3; }
+    #deck { height: auto; max-height: 16; background: #181a20; border-top: solid #2c3038; }
+    #inspector { height: auto; width: 100%; }
+    #notes { height: 6; }
+    .toolbar { height: 1; padding: 0 1; background: #181a20; }
+    #path { width: 1fr; height: 1; }
+    Button {
+        height: 1;
+        min-height: 1;
+        min-width: 0;
+        margin: 0 1 0 0;
+        padding: 0 1;
+        border: none;
+    }
+    Input { height: 1; min-height: 1; }
     """
     BINDINGS = [
-        Binding("ctrl+s", "project", "Project"),
-        Binding("ctrl+e", "paint", "Paint"),
-        Binding("ctrl+y", "copy", "Copy"),
-        Binding("ctrl+f", "focus_filter", "Find"),
-        Binding("ctrl+t", "focus_text", "Text"),
-        Binding("ctrl+b", "favourite", "Favourite"),
-        Binding("ctrl+o", "open", "Open", show=False),
+        Binding("ctrl+s", "project", "Project", priority=True),
+        Binding("ctrl+e", "paint", "Paint", priority=True),
+        Binding("ctrl+y", "copy", "Copy", priority=True),
+        Binding("ctrl+f", "focus_filter", "Fonts", priority=True),
+        Binding("ctrl+t", "focus_text", "Type", priority=True),
+        Binding("ctrl+b", "favourite", "Favourite", priority=True),
+        Binding("ctrl+o", "open", "Open", show=False, priority=True),
         Binding("ctrl+left", "section_prev", show=False, priority=True),
         Binding("ctrl+right", "section_next", show=False, priority=True),
+        Binding("escape", "back", "Back", priority=True),
     ]
 
     def __init__(self, project: Project | None = None) -> None:
@@ -162,8 +201,10 @@ class MeowText(App):
         self._by_id: dict[str, FontInfo] = {}
         self._picked: dict[str, str] = {}
         self.font_id: str | None = None
+        self._font_at = 0
         self._updating = False
         self._ui_ready = False
+        self._rendering = False
         self.last_banner: Banner | None = None
         self._relations = RelationPalette()
         self._source: Grid | None = None
@@ -171,7 +212,6 @@ class MeowText(App):
         self._source_missing: tuple[str, ...] = ()
         self._source_folded = False
         self._role_sig: tuple | None = None
-        self._role_echoes = 0
         self._animation = Animation()
         self._frame = 0
         self._anim_timer = None
@@ -194,265 +234,110 @@ class MeowText(App):
         self._pending_roles: dict | None = None
         self._section = "look"
         self.notes = ""
+        self._anchor: tuple | None = None
+        self.knobs = {
+            "preset": "rainbow",
+            "gradient": "on",
+            "palette": "rainbow",
+            "direction": "horizontal",
+            "engine": "figlet",
+            "format": "ansi",
+            "recall": "",
+            "outline": "off",
+            "outline-mode": "shade",
+            "symbol": "░",
+            "outline-colour": "slate",
+            "outline-gradient": "off",
+            "outline-direction": "horizontal",
+            "outline-speed": "1",
+            "outline-distance": "0",
+            "outline-place": "both",
+            "outline-scope": "word",
+            "sides": "tblr",
+            "odx": "0",
+            "ody": "0",
+            "shadow": "off",
+            "dx": "1",
+            "dy": "1",
+            "shadow-colour": "ink",
+            "shadow-symbol": "same",
+            "grad-which": "letters",
+            "blend": "smooth",
+            "stop": "0",
+            "stop-h": "0",
+            "stop-s": "100",
+            "stop-v": "100",
+            "hue": "0",
+            "role": "",
+            "link": "on",
+            "focus-role": "off",
+            "role-h": "0",
+            "role-s": "100",
+            "role-v": "100",
+            "animation": "none",
+            "anim-speed": "1",
+            "anim-direction": "forward",
+            "anim-travel": "360",
+            "anim-layers": "all",
+            "trace-pattern": "outline",
+            "trace-reveal": "draw",
+        }
 
     def compose(self) -> ComposeResult:
         yield Header()
+        with Vertical(id="fonts"):
+            yield Input(value="meow", placeholder="Words", id="text", compact=True, max_length=240)
+        with Vertical(id="stage"):
+            yield Static("", id="meta")
+            yield Static("", id="paint-bar")
+            with ScrollableContainer(id="stage-scroll"):
+                yield BannerView("", id="preview")
+        with Vertical(id="deck"):
+            yield Input(placeholder="Font name", id="filter", compact=True)
+            yield Static("", id="matches")
+            yield Board(_SECTIONS, id="inspector")
+            yield TextArea(id="notes")
         with Horizontal(classes="toolbar"):
-            yield Input(value="meow", placeholder="Banner text", id="text", compact=True, max_length=240)
-            yield Cycle((("FIGlet", "figlet"), ("TOIlet", "toilet"), ("TheDraw", "tdf")), "figlet", id="engine")
-        with Horizontal(id="middle"):
-            with Vertical(id="side"):
-                yield Input(placeholder="Filter fonts", id="filter", compact=True)
-                yield Cycle((("—", ""),), "", id="variant", label="Colour")
-                yield OptionList(id="font-list")
-            with Vertical(id="stage"):
-                yield Static("", id="meta")
-                yield Static("", id="paint-bar")
-                with ScrollableContainer(id="stage-scroll"):
-                    yield BannerView("", id="preview")
-            with Vertical(id="inspector"):
-                yield Cycle(_SECTION_OPTIONS, "look", id="section", label="Section")
-                yield from self._pages()
-        with Horizontal(classes="toolbar"):
-            yield Cycle(
-                (
-                    ("ANSI", "ansi"),
-                    ("Plain", "plain"),
-                    ("HTML", "html"),
-                    ("JSON", "json"),
-                    ("PNG", "png"),
-                    ("Kitty", "kitty"),
-                    ("IRC", "irc"),
-                ),
-                "ansi",
-                id="format",
-                label="Export",
-            )
             yield Input(value="banner.ans", id="path", compact=True)
             yield Button("Export", id="export")
             yield Button("Copy", id="copy")
             yield Button("Open", id="open")
         yield Footer()
 
-    def _pages(self) -> ComposeResult:
-        with VerticalScroll(id="page-look", classes="page"):
-            yield Cycle(tuple((name.title(), name) for name in self._presets), "rainbow", id="preset", label="Look")
-            yield Switch(value=True, id="gradient")
-            yield Label("Gradient on", id="gradient-label", classes="tag")
-            yield Cycle(self._palette_options(), "rainbow", id="palette", label="Palette")
-            yield Cycle(
-                (("Across", "horizontal"), ("Down", "vertical"), ("Diagonal", "diagonal")),
-                "horizontal",
-                id="direction",
-                label="Direction",
-            )
-            yield Label("Favourites", classes="tag")
-            yield OptionList(id="favourites")
-            yield Input(placeholder="Name this look", id="preset-name", compact=True)
-            yield Button("Save look", id="save-preset")
-        with VerticalScroll(id="page-outline", classes="page"):
-            yield Switch(value=False, id="outline")
-            yield Label("Outline off", id="outline-label", classes="tag")
-            yield Cycle(OUTLINE_MODES, "shade", id="outline-mode", label="Mode")
-            yield Cycle(self._symbols, "░", id="symbol", label="Symbol")
-            yield Input(placeholder="Add a symbol", id="custom-symbol", compact=True, max_length=2)
-            yield Button("Add symbol", id="add-symbol")
-            yield Cycle(tuple((name, name) for name in COLOURS), "slate", id="outline-colour", label="Colour")
-            yield Cycle(self._palette_options(off=True), "off", id="outline-gradient", label="Gradient")
-            yield Cycle(
-                (("Across", "horizontal"), ("Down", "vertical"), ("Diagonal", "diagonal")),
-                "horizontal",
-                id="outline-direction",
-                label="Direction",
-            )
-            yield Cycle(ANIM_SPEEDS, "1", id="outline-speed", label="Cycle speed")
-            yield Cycle(OUTLINE_DISTANCES, "0", id="outline-distance", label="Distance")
-            yield Cycle(OUTLINE_PLACES, "both", id="outline-place", label="Place")
-            yield Cycle(OUTLINE_SCOPES, "word", id="outline-scope", label="Around")
-            yield Switch(value=True, id="side-t")
-            yield Label("Top", classes="tag")
-            yield Switch(value=True, id="side-b")
-            yield Label("Bottom", classes="tag")
-            yield Switch(value=True, id="side-l")
-            yield Label("Left", classes="tag")
-            yield Switch(value=True, id="side-r")
-            yield Label("Right", classes="tag")
-            yield Label("Shift", classes="tag")
-            yield Input(value="0", id="odx", compact=True, type="integer", classes="nudge")
-            yield Input(value="0", id="ody", compact=True, type="integer", classes="nudge")
-        with VerticalScroll(id="page-shadow", classes="page"):
-            yield Switch(value=False, id="shadow")
-            yield Label("Shadow off", id="shadow-label", classes="tag")
-            yield Label("Shift", classes="tag")
-            yield Input(value="1", id="dx", compact=True, type="integer", classes="nudge")
-            yield Input(value="1", id="dy", compact=True, type="integer", classes="nudge")
-            yield Cycle(tuple((name, name) for name in COLOURS), "ink", id="shadow-colour", label="Colour")
-            yield Cycle((("same", "same"),) + self._symbols, "same", id="shadow-symbol", label="Symbol")
-        with VerticalScroll(id="page-colour", classes="page"):
-            yield Cycle((("Letters", "letters"), ("Outline", "outline")), "letters", id="grad-which", label="Editing")
-            yield Cycle((("Smooth", "smooth"), ("Bands", "bands")), "smooth", id="blend", label="Blend")
-            yield Cycle((("Stop 1", "0"),), "0", id="stop", label="Stop")
-            yield Label("H", classes="tag")
-            yield Input(value="0", id="stop-h", compact=True, type="integer", classes="nudge")
-            yield Label("S", classes="tag")
-            yield Input(value="100", id="stop-s", compact=True, type="integer", classes="nudge")
-            yield Label("V", classes="tag")
-            yield Input(value="100", id="stop-v", compact=True, type="integer", classes="nudge")
-            yield Button("Add stop", id="add-stop")
-            yield Button("Remove stop", id="remove-stop")
-            yield Input(placeholder="Save palette as", id="palette-name", compact=True)
-            yield Button("Save palette", id="save-palette")
-            with Vertical(id="relations"):
-                yield Label("Hue", classes="tag")
-                yield Button("-", id="hue-minus")
-                yield Input(value="0", id="hue", compact=True, type="integer", classes="nudge")
-                yield Button("+", id="hue-plus")
-                yield Label("Role", classes="tag")
-                yield Select((("—", -1),), value=-1, allow_blank=False, id="role", compact=True)
-                yield Label("Link", classes="tag")
-                yield Switch(value=True, id="link")
-                yield Label("Focus", classes="tag")
-                yield Switch(value=False, id="focus-role")
-                yield Label("H", classes="tag")
-                yield Input(value="0", id="role-h", compact=True, type="integer", classes="nudge")
-                yield Label("S", classes="tag")
-                yield Input(value="100", id="role-s", compact=True, type="integer", classes="nudge")
-                yield Label("V", classes="tag")
-                yield Input(value="100", id="role-v", compact=True, type="integer", classes="nudge")
-                yield Button("Split sections", id="split")
-        with VerticalScroll(id="page-animate", classes="page"):
-            yield Cycle(ANIMATIONS, "none", id="animation", label="Motion")
-            yield Cycle(ANIM_SPEEDS, "1", id="anim-speed", label="Speed")
-            yield Cycle(ANIM_DIRECTIONS, "forward", id="anim-direction", label="Direction")
-            yield Cycle(ANIM_TRAVELS, "360", id="anim-travel", label="Travel")
-            yield Cycle(ANIM_LAYERS, "all", id="anim-layers", label="Moves")
-            yield Cycle(TRACE_PATTERNS, "outline", id="trace-pattern", label="Trace")
-            yield Cycle(TRACE_REVEALS, "draw", id="trace-reveal", label="Trace does")
-        with Vertical(id="page-notes", classes="page"):
-            yield TextArea(id="notes")
-            yield Static(
-                "Notes are saved with the project and with a favourite. "
-                "Palettes, symbols, and looks you save are loaded from ~/.config/meowtext. "
-                "Ctrl+E paints the banner. Tab switches between the banner and one letter.",
-                id="notes-hint",
-            )
-
     def on_mount(self) -> None:
         self.query_one("#paint-bar", Static).display = False
-        self.query_one("#variant", Cycle).display = False
-        for name in _SECTIONS:
-            if name != "look":
-                self.query_one(f"#page-{name}").display = False
-        self._reload_favourites()
+        self.query_one("#filter", Input).display = False
+        self.query_one("#matches", Static).display = False
+        self.query_one("#notes", TextArea).display = False
         self._ui_ready = True
         self._fill_fonts()
+        self._refresh_board()
         if self._opened is not None:
             self._apply_project(self._opened)
-        self.query_one("#text", Input).focus()
+        self.query_one("#inspector", Board).focus()
 
-    def on_cycle_changed(self, event: Cycle.Changed) -> None:
-        if not self._ui_ready or self._updating:
-            return
-        choice = event.cycle.id
-        if choice == "section":
-            self._section = event.value
-            self._show_section()
-            return
-        if choice == "engine":
-            self.font_id = None
-            self._letters.clear()
-            self._patches.clear()
-            self._fill_fonts()
-            return
-        if choice == "format":
-            self._sync_suffix()
-            return
-        if choice == "variant":
-            family = self._current_family()
-            if family is not None and event.value:
-                self._picked[family.key] = event.value
-                self.font_id = event.value
-                self._render_preview()
-            return
-        if choice == "animation":
-            self._read_animation()
-            self._set_animation(event.value)
-            return
-        if choice in {"anim-speed", "anim-direction", "anim-travel", "anim-layers", "trace-pattern", "trace-reveal"}:
-            self._read_animation()
-            self._render_preview()
-            return
-        if choice == "palette":
-            self._stops = None if event.value != "edited" else self._stops
-            self._after_style_edit()
-            self._sync_stops()
-            return
-        if choice == "outline-gradient":
-            self._outline_stops = None if event.value != "edited" else self._outline_stops
-            self._after_style_edit()
-            self._sync_stops()
-            return
-        if choice == "grad-which":
-            self._sync_stops()
-            return
-        if choice == "blend":
-            if self._choice("grad-which", "letters") == "outline":
-                self._outline_bands = event.value == "bands"
-            else:
-                self._bands = event.value == "bands"
-            self._after_style_edit()
-            return
-        if choice == "stop":
-            self._sync_stops()
-            return
-        if choice == "preset":
-            self._apply_preset(event.value)
-            return
-        self._after_style_edit()
+    def on_board_turn(self, event: Board.Turn) -> None:
+        self._cycle_knob(event.knob, event.delta)
 
-    def on_switch_changed(self, event: Switch.Changed) -> None:
-        if not self._ui_ready or self._updating:
-            return
-        if event.switch.id == "link":
-            self._toggle_link(event.value)
-            return
-        if event.switch.id == "focus-role":
-            self._render_preview()
-            return
-        if event.switch.id == "gradient":
-            self.query_one("#gradient-label", Label).update("Gradient on" if event.value else "Gradient off")
-        if event.switch.id == "outline":
-            self.query_one("#outline-label", Label).update("Outline on" if event.value else "Outline off")
-        if event.switch.id == "shadow":
-            self.query_one("#shadow-label", Label).update("Shadow on" if event.value else "Shadow off")
-        self._after_style_edit()
+    def on_board_go(self, event: Board.Go) -> None:
+        self._go(event.section)
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        if not self._ui_ready:
+        if not self._ui_ready or self._updating:
             return
-        field = event.input.id
-        if field == "filter":
-            self._fill_fonts()
-            return
-        if field == "hue":
-            if not self._updating:
-                self._set_hue_from_input()
-            return
-        if field in {"role-h", "role-s", "role-v"}:
-            if not self._updating:
-                self._set_role_from_inputs()
-            return
-        if field in {"stop-h", "stop-s", "stop-v"}:
-            if not self._updating and self._section == "colour":
-                self._set_stop_from_inputs()
-            return
-        if field in {"path", "preset-name", "palette-name", "custom-symbol"} or self._updating:
-            return
-        if field == "text":
+        if event.input.id == "filter":
+            self._font_at = 0
+            self._move_font(0)
+        elif event.input.id == "text":
             self._patches.clear()
-        else:
-            self._sync_preset_selection()
-        self._render_preview()
+            self._render_preview()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "filter":
+            self._close_search()
+            self.query_one("#inspector", Board).focus()
+        elif event.input.id == "text":
+            self.query_one("#inspector", Board).focus()
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         self.notes = event.text_area.text
@@ -465,83 +350,17 @@ class MeowText(App):
             self.action_copy()
         elif button == "open":
             self.action_open()
-        elif button == "hue-minus":
-            self._nudge_hue(-15)
-        elif button == "hue-plus":
-            self._nudge_hue(15)
-        elif button == "split":
-            self._split_role()
-        elif button == "add-stop":
-            self._add_stop()
-        elif button == "remove-stop":
-            self._remove_stop()
-        elif button == "save-palette":
-            self._save_palette()
-        elif button == "save-preset":
-            self._save_preset()
-        elif button == "add-symbol":
-            self._add_symbol()
 
-    def on_select_changed(self, event: Select.Changed) -> None:
-        if not self._ui_ready or self._updating or event.select.id != "role":
-            return
-        try:
-            slot = int(event.value)  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            return
-        if slot < 0:
-            return
-        if self._role_echoes:
-            self._role_echoes -= 1
-            self._show_role_editor()
-            return
-        self._arm_focus()
-        self._render_preview()
-
-    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
-        if not self._ui_ready or self._updating or event.option_list.id != "font-list":
-            return
-        option_id = event.option_id
-        if not option_id or str(option_id).startswith("header"):
-            return
-        family = self._family_by_key.get(str(option_id))
-        if family is None:
-            return
-        chosen = self._picked.get(family.key, family.members[0].id)
-        if chosen == self.font_id and family.key == self._family_key():
-            return
-        self.font_id = chosen
-        self._show_variant(family)
-        self._letters.clear()
-        self._patches.clear()
-        self._render_preview()
-
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if event.option_list.id != "favourites" or not event.option_id:
-            return
-        try:
-            project = load_favourite(Path(str(event.option_id)))
-        except RenderError as exc:
-            self.notify(str(exc), severity="error")
-            return
-        self._apply_project(project)
-        self.notify(f"Loaded {Path(str(event.option_id)).stem}")
-
-    def on_key(self, event) -> None:
+    def on_key(self, event: events.Key) -> None:
         focused = self.focused
-        if isinstance(focused, Switch) and event.key in {"left", "right"}:
-            focused.value = event.key == "right"
+        if isinstance(focused, Input) and focused.id == "filter" and event.key in {"up", "down", "pageup", "pagedown"}:
+            step = 5 if event.key in {"pageup", "pagedown"} else 1
+            if event.key in {"up", "pageup"}:
+                step = -step
+            self._move_font(step)
             event.stop()
             return
-        if isinstance(focused, Input) and "nudge" in focused.classes and event.key in {"left", "right"}:
-            self._nudge_input(focused, -1 if event.key == "left" else 1)
-            event.stop()
-            return
-        if isinstance(focused, Select) and event.key in {"left", "right"}:
-            self._cycle_select(focused, 1 if event.key == "right" else -1)
-            event.stop()
-            return
-        if not self._paint or isinstance(focused, (Input, TextArea)):
+        if not self._paint or not isinstance(focused, BannerView):
             return
         if event.key in {"left", "right", "up", "down"}:
             self._move_cursor(event.key)
@@ -569,11 +388,34 @@ class MeowText(App):
             self._paint_char(event.character)
             event.stop()
 
+    def _close_search(self) -> None:
+        self.query_one("#filter", Input).display = False
+        self.query_one("#matches", Static).display = False
+        self.query_one("#inspector", Board).display = True
+        self.query_one("#notes", TextArea).display = self._section == "notes"
+
     def action_focus_filter(self) -> None:
-        self.query_one("#filter", Input).focus()
+        self._font_at = self._index_of_current_font()
+        self.query_one("#inspector", Board).display = False
+        self.query_one("#notes", TextArea).display = False
+        field = self.query_one("#filter", Input)
+        field.display = True
+        field.focus()
+        self._show_matches()
 
     def action_focus_text(self) -> None:
+        self._close_search()
         self.query_one("#text", Input).focus()
+
+    def action_back(self) -> None:
+        if self._paint:
+            self.action_paint()
+            return
+        self._close_search()
+        if self._section == "notes":
+            self._go("look")
+            return
+        self.query_one("#inspector", Board).focus()
 
     def action_section_next(self) -> None:
         self._step_section(1)
@@ -582,8 +424,6 @@ class MeowText(App):
         self._step_section(-1)
 
     def action_project(self) -> None:
-        """Save the editable project. An existing file keeps its bytes."""
-
         self._render_preview()
         font = self._by_id.get(self.font_id or "")
         project = self._project()
@@ -657,7 +497,8 @@ class MeowText(App):
         except OSError as exc:
             self.notify(str(exc), severity="error")
             return
-        self._reload_favourites()
+        self.knobs["recall"] = str(path)
+        self._refresh_board()
         self.notify(f"Favourite {path.name}")
 
     def action_paint(self) -> None:
@@ -666,6 +507,8 @@ class MeowText(App):
         if self._paint:
             self._letter = self._first_letter()
             self.query_one("#preview", Static).focus()
+        else:
+            self.query_one("#inspector", Board).focus()
         self._refresh_paint_bar()
         self._show_frame()
 
@@ -692,10 +535,10 @@ class MeowText(App):
         self._updating = True
         try:
             self.query_one("#text", Input).value = project.text
-            self.query_one("#engine", Cycle).set_value(project.engine if project.engine in {"figlet", "toilet", "tdf"} else "figlet")
+            self.knobs["engine"] = project.engine if project.engine in {"figlet", "toilet", "tdf"} else "figlet"
             self.query_one("#notes", TextArea).text = project.notes
             self.notes = project.notes
-            self._set_style_widgets(project.style)
+            self._write_style(project.style)
             self._stops = project.style.stops
             self._outline_stops = project.style.outline_stops
             self._bands = project.style.bands
@@ -705,6 +548,7 @@ class MeowText(App):
             self._letters = {char: grid.copy() for char, grid in project.letters.items()}
             self._relations = RelationPalette(hue=project.hue)
             self._relations.roles = {slot: role.clone() for slot, role in project.roles.items()}
+            self.knobs["hue"] = str(int(round(project.hue)) % 360)
             self._pending_roles = self._relations.roles
         finally:
             self._updating = False
@@ -712,14 +556,15 @@ class MeowText(App):
         self._source_key = None
         self._fill_fonts()
         self._select_project_font(project)
-        self._sync_stops()
+        self._sync_stop_numbers()
+        self._refresh_board()
         self._render_preview()
 
     def _select_project_font(self, project: Project) -> None:
         match = None
         for font in self._by_id.values():
             if font.name == project.font_name and font.index == project.font_index:
-                if not project.font_source or font.source == project.font_source or Path(font.source).name == Path(project.font_source).name:
+                if not project.font_source or Path(font.source).name == Path(project.font_source).name or font.source == project.font_source:
                     match = font
                     break
         if match is None:
@@ -731,43 +576,544 @@ class MeowText(App):
             return
         self.font_id = match.id
         family = self._family_for_font(match.id)
-        if family is None:
-            return
-        self._picked[family.key] = match.id
-        options = self.query_one("#font-list", OptionList)
-        ids = [str(option.id) for option in options.options]
-        if family.key in ids:
-            options.highlighted = ids.index(family.key)
-        self._show_variant(family)
+        if family is not None:
+            self._picked[family.key] = match.id
 
-    def _palette_options(self, off: bool = False) -> tuple[tuple[str, str], ...]:
-        options = [("flat", "off")] if off else []
-        options.extend((name, name) for name in self._palettes)
-        options.append(("edited", "edited"))
-        return tuple(options)
-
-    def _show_section(self) -> None:
-        for name in _SECTIONS:
-            self.query_one(f"#page-{name}").display = name == self._section
-        if self._section == "colour":
-            self._sync_stops()
-
-    def _step_section(self, delta: int) -> None:
-        index = _SECTIONS.index(self._section)
-        self._section = _SECTIONS[(index + delta) % len(_SECTIONS)]
-        self._updating = True
-        try:
-            self.query_one("#section", Cycle).set_value(self._section)
-        finally:
-            self._updating = False
-        self._show_section()
+    def _choice(self, key: str, default: str = "") -> str:
+        value = self.knobs.get(key, default)
+        return default if value is None or value == "" else str(value)
 
     def _engine_name(self) -> str:
         return self._choice("engine", "figlet")
 
-    def _choice(self, widget_id: str, default: str = "") -> str:
-        value = self.query_one(f"#{widget_id}", Cycle).value
-        return default if value is None or value == "" else str(value)
+    def _go(self, section: str) -> None:
+        self._section = section
+        notes = self.query_one("#notes", TextArea)
+        searching = self.query_one("#filter", Input).display
+        notes.display = section == "notes" and not searching
+        self._refresh_board(reset=True)
+        if section == "notes":
+            notes.focus()
+        elif not isinstance(self.focused, Input):
+            self.query_one("#inspector", Board).focus()
+
+    def _step_section(self, delta: int) -> None:
+        names = [name for name, _label in _SECTIONS]
+        index = names.index(self._section) if self._section in names else 0
+        self._go(names[(index + delta) % len(names)])
+
+    def _cycle_knob(self, key: str, delta: int) -> None:
+        if key == "variant":
+            self._cycle_variant(delta)
+            return
+        if key == "add-stop":
+            self._add_stop()
+            return
+        if key == "remove-stop":
+            self._remove_stop()
+            return
+        if key == "split":
+            self._split_role()
+            return
+        if not self._enabled(key):
+            return
+        if key in _NUMBERS:
+            self._nudge_number(key, delta * _NUMBERS[key])
+            return
+        options = self._options(key)
+        if not options:
+            return
+        values = [value for _label, value in options]
+        current = self.knobs.get(key, values[0])
+        index = values.index(current) if current in values else 0
+        self._set_knob(key, values[(index + delta) % len(values)])
+
+    def _set_knob(self, key: str, value: str) -> None:
+        self.knobs[key] = value
+        if self._updating:
+            return
+        if key == "preset":
+            self._apply_preset(value)
+            return
+        if key == "engine":
+            self.font_id = None
+            self._letters.clear()
+            self._patches.clear()
+            self._fill_fonts()
+            return
+        if key == "recall" and value:
+            try:
+                self._apply_project(load_favourite(Path(value)))
+            except RenderError as exc:
+                self.notify(str(exc), severity="error")
+            return
+        if key.startswith("anim") or key == "animation" or key.startswith("trace"):
+            self._arm_animation()
+        elif key in {"stop", "stop-h", "stop-s", "stop-v", "blend", "grad-which"}:
+            self._apply_stop(key)
+        elif key in {"hue", "role", "link", "focus-role", "role-h", "role-s", "role-v"}:
+            self._apply_role(key)
+        self._sync_preset_selection()
+        self._refresh_board()
+        self._render_preview()
+
+    def _nudge_number(self, key: str, delta: int) -> None:
+        try:
+            value = int(self.knobs.get(key, "0"))
+        except ValueError:
+            value = 0
+        if key in {"odx", "ody", "dx", "dy"}:
+            value = max(-8, min(8, value + delta))
+        elif key in {"stop-s", "stop-v", "role-s", "role-v"}:
+            value = max(0, min(100, value + delta))
+        else:
+            value = (value + delta) % 360
+        self._set_knob(key, str(value))
+
+    def _enabled(self, key: str) -> bool:
+        gradient = self.knobs.get("gradient") == "on"
+        outlined = self.knobs.get("outline") == "on"
+        adaptive = self.knobs.get("outline-mode") in {"contour", "heavy", "double", "blocks"}
+        if key in {"palette", "direction"}:
+            return gradient
+        if key == "symbol":
+            return outlined and not adaptive
+        if key.startswith("outline-") or key in {"sides", "odx", "ody"}:
+            return outlined
+        if key in {"role-h", "role-s", "role-v"}:
+            return self.knobs.get("link") != "on"
+        return True
+
+    def _options(self, key: str) -> list[tuple[str, str]]:
+        if key == "preset":
+            options = [(name, name) for name in self._presets]
+            if self.knobs.get("preset") not in self._presets:
+                options.append(("custom", "custom"))
+            return options
+        if key in {"gradient", "outline", "shadow", "link", "focus-role"}:
+            return list(_ON)
+        if key == "palette":
+            return [(name, name) for name in self._palettes] + [("edited", "edited")]
+        if key == "direction":
+            return list(GRADIENT_DIRECTIONS)
+        if key == "engine":
+            return list(_ENGINES)
+        if key == "format":
+            return list(_FORMATS)
+        if key == "recall":
+            return [("(none)", "")] + [(path.stem, str(path)) for path in list_favourites()]
+        if key == "outline-mode":
+            return list(OUTLINE_MODES)
+        if key == "symbol":
+            options = list(self._symbols)
+            if self.knobs.get("symbol") not in {value for _label, value in options}:
+                options.append((self.knobs.get("symbol", "░"), self.knobs.get("symbol", "░")))
+            return options
+        if key == "outline-colour" or key == "shadow-colour":
+            return [(name, name) for name in COLOURS]
+        if key == "outline-gradient":
+            return [("flat", "off")] + [(name, name) for name in self._palettes] + [("edited", "edited")]
+        if key == "outline-direction":
+            return list(OUTLINE_DIRECTIONS)
+        if key in {"outline-speed", "anim-speed"}:
+            return list(ANIM_SPEEDS)
+        if key == "outline-distance":
+            return list(OUTLINE_DISTANCES)
+        if key == "outline-place":
+            return list(OUTLINE_PLACES)
+        if key == "outline-scope":
+            return list(OUTLINE_SCOPES)
+        if key == "sides":
+            options = list(_SIDES)
+            if self.knobs.get("sides") not in {value for _label, value in options}:
+                options.append((self.knobs.get("sides", "tblr"), self.knobs.get("sides", "tblr")))
+            return options
+        if key == "shadow-symbol":
+            return [("same", "same")] + list(self._symbols)
+        if key == "grad-which":
+            return [("Letters", "letters"), ("Outline", "outline")]
+        if key == "blend":
+            return [("Smooth", "smooth"), ("Bands", "bands")]
+        if key == "stop":
+            stops = self._active_stops()
+            return [(f"Stop {index + 1}", str(index)) for index in range(len(stops))]
+        if key == "animation":
+            return list(ANIMATIONS)
+        if key == "anim-direction":
+            return list(ANIM_DIRECTIONS)
+        if key == "anim-travel":
+            return list(ANIM_TRAVELS)
+        if key == "anim-layers":
+            return list(ANIM_LAYERS)
+        if key == "trace-pattern":
+            return list(TRACE_PATTERNS)
+        if key == "trace-reveal":
+            return list(TRACE_REVEALS)
+        if key == "role":
+            source = self._source or Grid()
+            return [(f"{self._relations.roles[slot].name}", str(slot)) for slot in used_slots(source) if slot in self._relations.roles]
+        return []
+
+    def _text(self, key: str) -> str:
+        value = self.knobs.get(key, "")
+        for label, item in self._options(key):
+            if item == value:
+                return label
+        return value or "—"
+
+    def _rows(self) -> list[Knob]:
+        def knob(key: str, hotkey: str, label: str) -> Knob:
+            return Knob(key, hotkey, label, self._text(key), self._enabled(key))
+
+        section = self._section
+        if section == "look":
+            rows = [
+                knob("preset", "p", "Look"),
+                knob("gradient", "g", "Gradient"),
+                knob("palette", "c", "Palette"),
+                knob("direction", "d", "Direction"),
+                knob("engine", "e", "Engine"),
+                knob("format", "x", "Export"),
+                knob("recall", "r", "Recall"),
+            ]
+        elif section == "outline":
+            rows = [
+                knob("outline", "o", "Outline"),
+                knob("outline-mode", "m", "Mode"),
+                knob("symbol", "y", "Symbol"),
+                knob("outline-colour", "c", "Colour"),
+                knob("outline-gradient", "g", "Gradient"),
+                knob("outline-direction", "d", "Direction"),
+                knob("outline-speed", "s", "Speed"),
+                knob("outline-distance", "i", "Distance"),
+                knob("outline-place", "p", "Place"),
+                knob("outline-scope", "a", "Around"),
+                knob("sides", "e", "Sides"),
+                knob("odx", "h", "Shift across"),
+                knob("ody", "v", "Shift down"),
+            ]
+        elif section == "shadow":
+            rows = [
+                knob("shadow", "o", "Shadow"),
+                knob("dx", "x", "Across"),
+                knob("dy", "y", "Down"),
+                knob("shadow-colour", "c", "Colour"),
+                knob("shadow-symbol", "g", "Symbol"),
+            ]
+        elif section == "colour":
+            rows = [
+                knob("grad-which", "w", "Editing"),
+                knob("blend", "b", "Blend"),
+                knob("stop", "n", "Stop"),
+                knob("stop-h", "h", "Hue"),
+                knob("stop-s", "s", "Saturation"),
+                knob("stop-v", "t", "Value"),
+            ]
+            if used_slots(self._source or Grid()):
+                rows.extend(
+                    [
+                        knob("hue", "u", "Role hue"),
+                        knob("role", "r", "Role"),
+                        knob("link", "l", "Link"),
+                        knob("focus-role", "f", "Focus"),
+                        knob("role-h", "j", "This hue"),
+                        knob("role-s", "a", "This saturation"),
+                        knob("role-v", "i", "This value"),
+                        Knob("split", "k", "Split", "the sections of this role", True),
+                    ]
+                )
+        elif section == "animate":
+            rows = [
+                knob("animation", "a", "Motion"),
+                knob("anim-speed", "s", "Speed"),
+                knob("anim-direction", "d", "Direction"),
+                knob("anim-travel", "t", "Travel"),
+                knob("anim-layers", "l", "Moves"),
+                knob("trace-pattern", "p", "Trace"),
+                knob("trace-reveal", "r", "Trace does"),
+            ]
+        else:
+            rows = []
+        family = self._current_family()
+        if family is not None and len(family.members) > 1 and section == "look":
+            chosen = self._picked.get(family.key, family.members[0].id)
+            label = next((member.name for member in family.members if member.id == chosen), family.members[0].name)
+            rows.insert(0, Knob("variant", "v", "Font colour", label, True))
+        return rows
+
+    def _refresh_board(self, reset: bool = False) -> None:
+        board = self.query_one("#inspector", Board)
+        board.show(self._section, self._rows(), 0 if reset else None)
+
+    def _apply_preset(self, name: str) -> None:
+        style = self._presets.get(name)
+        if style is None:
+            return
+        self._updating = True
+        try:
+            self._write_style(style)
+            self._stops = style.stops
+            self._outline_stops = style.outline_stops
+            self._bands = style.bands
+            self._outline_bands = style.outline_bands
+            self.knobs["preset"] = name
+        finally:
+            self._updating = False
+        self._sync_stop_numbers()
+        self._refresh_board()
+        self._render_preview()
+
+    def _write_style(self, style: BannerStyle) -> None:
+        self.knobs["gradient"] = "on" if style.gradient else "off"
+        self.knobs["palette"] = "edited" if style.stops else (style.gradient or "rainbow")
+        self.knobs["direction"] = style.direction
+        self.knobs["outline"] = "on" if style.outline else "off"
+        self.knobs["outline-mode"] = style.outline_mode
+        self.knobs["symbol"] = style.outline_char
+        self.knobs["outline-colour"] = colour_name(style.outline_color)
+        self.knobs["outline-gradient"] = "edited" if style.outline_stops else (style.outline_gradient or "off")
+        self.knobs["outline-direction"] = style.outline_direction
+        self.knobs["outline-speed"] = self._nearest_speed(style.outline_speed)
+        self.knobs["outline-distance"] = str(style.outline_distance)
+        self.knobs["outline-place"] = style.outline_place
+        self.knobs["outline-scope"] = style.outline_scope
+        self.knobs["sides"] = style.outline_sides if style.outline_sides in {value for _label, value in _SIDES} else (style.outline_sides or "none")
+        self.knobs["odx"] = str(style.outline_dx)
+        self.knobs["ody"] = str(style.outline_dy)
+        self.knobs["shadow"] = "on" if style.shadow else "off"
+        self.knobs["dx"] = str(style.shadow_dx)
+        self.knobs["dy"] = str(style.shadow_dy)
+        self.knobs["shadow-colour"] = colour_name(style.shadow_color)
+        self.knobs["shadow-symbol"] = style.shadow_char or "same"
+
+    def _sync_preset_selection(self) -> None:
+        match = next((name for name, preset in self._presets.items() if preset == self._style()), "custom")
+        self.knobs["preset"] = match
+
+    def _style(self) -> BannerStyle:
+        gradient_on = self.knobs.get("gradient") == "on"
+        palette = self._choice("palette", "rainbow")
+        outline_gradient = self._choice("outline-gradient", "off")
+        shadow_symbol = self._choice("shadow-symbol", "same")
+        sides = self.knobs.get("sides", "tblr")
+        if sides == "none":
+            sides = ""
+        return BannerStyle(
+            gradient=None if not gradient_on else ("rainbow" if palette == "edited" else palette),
+            direction=self._choice("direction", "horizontal"),
+            stops=self._stops,
+            bands=self._bands,
+            outline=self.knobs.get("outline") == "on",
+            outline_char=self._choice("symbol", "░")[:1],
+            outline_color=COLOURS.get(self._choice("outline-colour", "slate"), DEFAULT_OUTLINE),
+            outline_mode=self._choice("outline-mode", "shade"),
+            outline_gradient=None if outline_gradient in {"off", "edited"} else outline_gradient,
+            outline_stops=self._outline_stops,
+            outline_direction=self._choice("outline-direction", "horizontal"),
+            outline_speed=float(self._choice("outline-speed", "1") or 1),
+            outline_bands=self._outline_bands,
+            outline_sides=sides,
+            outline_distance=self._int("outline-distance", 0),
+            outline_place=self._choice("outline-place", "both"),
+            outline_scope=self._choice("outline-scope", "word"),
+            outline_dx=self._int("odx", 0),
+            outline_dy=self._int("ody", 0),
+            shadow=self.knobs.get("shadow") == "on",
+            shadow_dx=self._int("dx", 1),
+            shadow_dy=self._int("dy", 1),
+            shadow_color=COLOURS.get(self._choice("shadow-colour", "ink"), DEFAULT_SHADOW),
+            shadow_char=None if shadow_symbol == "same" else shadow_symbol[:1],
+        )
+
+    def _int(self, key: str, default: int) -> int:
+        try:
+            return int(self.knobs.get(key, default))
+        except ValueError:
+            return default
+
+    def _nearest_speed(self, speed: float) -> str:
+        choices = [float(value) for _label, value in ANIM_SPEEDS]
+        nearest = min(choices, key=lambda item: abs(item - speed))
+        return str(int(nearest)) if nearest == int(nearest) else str(nearest)
+
+    def _write_animation(self, motion: Animation) -> None:
+        self.knobs["animation"] = motion.name if motion.name in {value for _label, value in ANIMATIONS} else "none"
+        self.knobs["anim-speed"] = self._nearest_speed(motion.speed)
+        self.knobs["anim-direction"] = motion.direction
+        self.knobs["anim-travel"] = str(motion.travel if str(motion.travel) in {value for _label, value in ANIM_TRAVELS} else 360)
+        self.knobs["anim-layers"] = motion.layers
+        self.knobs["trace-pattern"] = motion.pattern
+        self.knobs["trace-reveal"] = motion.reveal
+        self._arm_animation()
+
+    def _arm_animation(self) -> None:
+        self._animation = Animation(
+            name=self._choice("animation", "none"),
+            speed=float(self._choice("anim-speed", "1") or 1),
+            direction=self._choice("anim-direction", "forward"),
+            travel=int(self._choice("anim-travel", "360") or 360),
+            layers=self._choice("anim-layers", "all"),
+            pattern=self._choice("trace-pattern", "outline"),
+            reveal=self._choice("trace-reveal", "draw"),
+        )
+        self._frame = 0
+        if self._anim_timer is not None:
+            self._anim_timer.stop()
+            self._anim_timer = None
+        if self._animation.name != "none":
+            self._anim_timer = self.set_interval(0.12, self._tick_animation)
+        if not self._updating:
+            self._render_preview()
+
+    def _tick_animation(self) -> None:
+        self._frame += 1
+        self._render_preview()
+
+    def _active_stops(self) -> tuple[Color, ...]:
+        fallback = self._palettes.get("rainbow", (Color(255, 0, 64), Color(0, 190, 255)))
+        if self._choice("grad-which", "letters") == "outline":
+            if self._outline_stops:
+                return self._outline_stops
+            name = self._choice("outline-gradient", "off")
+            return self._palettes.get(name, fallback)
+        if self._stops:
+            return self._stops
+        return self._palettes.get(self._choice("palette", "rainbow"), fallback)
+
+    def _store_stops(self, stops: tuple[Color, ...]) -> None:
+        if self._choice("grad-which", "letters") == "outline":
+            self._outline_stops = stops
+            self.knobs["outline"] = "on"
+            self.knobs["outline-gradient"] = "edited"
+        else:
+            self._stops = stops
+            self.knobs["gradient"] = "on"
+            self.knobs["palette"] = "edited"
+
+    def _sync_stop_numbers(self) -> None:
+        stops = self._active_stops()
+        try:
+            index = int(self.knobs.get("stop", "0"))
+        except ValueError:
+            index = 0
+        index = min(max(index, 0), len(stops) - 1)
+        hue, sat, val = rgb_to_hsv(stops[index])
+        self.knobs["stop"] = str(index)
+        self.knobs["stop-h"] = str(int(round(hue)) % 360)
+        self.knobs["stop-s"] = str(int(round(sat * 100)))
+        self.knobs["stop-v"] = str(int(round(val * 100)))
+        self.knobs["blend"] = "bands" if (self._outline_bands if self._choice("grad-which") == "outline" else self._bands) else "smooth"
+
+    def _apply_stop(self, key: str) -> None:
+        if key == "blend":
+            bands = self.knobs.get("blend") == "bands"
+            if self._choice("grad-which") == "outline":
+                self._outline_bands = bands
+            else:
+                self._bands = bands
+            return
+        if key == "grad-which":
+            self._sync_stop_numbers()
+            return
+        if key == "stop":
+            self._sync_stop_numbers()
+            return
+        stops = list(self._active_stops())
+        try:
+            index = int(self.knobs.get("stop", "0"))
+            hue = float(self.knobs.get("stop-h", "0"))
+            sat = float(self.knobs.get("stop-s", "100")) / 100
+            val = float(self.knobs.get("stop-v", "100")) / 100
+        except ValueError:
+            return
+        if index < 0 or index >= len(stops):
+            return
+        stops[index] = hsv_to_rgb(hue, sat, val)
+        self._store_stops(tuple(stops))
+
+    def _add_stop(self) -> None:
+        if self._section != "colour":
+            return
+        stops = list(self._active_stops())
+        stops.append(stops[-1] if stops else Color(255, 255, 255))
+        self._store_stops(tuple(stops))
+        self.knobs["stop"] = str(len(stops) - 1)
+        self._sync_stop_numbers()
+        self._refresh_board()
+        self._render_preview()
+
+    def _remove_stop(self) -> None:
+        if self._section != "colour":
+            return
+        stops = list(self._active_stops())
+        if len(stops) <= 2:
+            self.notify("A gradient keeps at least two stops")
+            return
+        try:
+            index = int(self.knobs.get("stop", "0"))
+        except ValueError:
+            index = len(stops) - 1
+        del stops[max(0, min(index, len(stops) - 1))]
+        self._store_stops(tuple(stops))
+        self._sync_stop_numbers()
+        self._refresh_board()
+        self._render_preview()
+
+    def _selected_slot(self) -> int | None:
+        try:
+            slot = int(self.knobs.get("role", ""))
+        except ValueError:
+            return None
+        return slot
+
+    def _apply_role(self, key: str) -> None:
+        if key == "hue":
+            self._relations.hue = float(self._int("hue", 0)) % 360
+            return
+        slot = self._selected_slot()
+        if slot is None or slot not in self._relations.roles:
+            return
+        if key == "link":
+            if self.knobs.get("link") == "on":
+                self._relations.link_role(slot)
+            else:
+                self._relations.break_role(slot)
+            return
+        if key == "role":
+            self._sync_role_numbers()
+            return
+        if key in {"role-h", "role-s", "role-v"} and self.knobs.get("link") != "on":
+            self._relations.set_hsv(
+                slot,
+                float(self._int("role-h", 0)),
+                self._int("role-s", 100) / 100,
+                self._int("role-v", 100) / 100,
+            )
+
+    def _sync_role_numbers(self) -> None:
+        slot = self._selected_slot()
+        if slot is None or slot not in self._relations.roles:
+            return
+        role = self._relations.roles[slot]
+        if role.linked:
+            hue, sat, val = rgb_to_hsv(role.paint(self._relations.hue))
+        else:
+            hue, sat, val = role.hue, role.sat, role.val
+        self.knobs["link"] = "on" if role.linked else "off"
+        self.knobs["role-h"] = str(int(round(hue)) % 360)
+        self.knobs["role-s"] = str(int(round(sat * 100)))
+        self.knobs["role-v"] = str(int(round(val * 100)))
+
+    def _split_role(self) -> None:
+        slot = self._selected_slot()
+        if slot is None or self._source is None or slot not in self._relations.roles:
+            return
+        made = self._relations.split(self._source, slot)
+        name = self._relations.roles[slot].name
+        self.notify(f"{name} is already one section" if made == 0 else f"Split {name} into {made + 1} sections")
+        self._role_sig = None
+        self._refresh_board()
+        self._render_preview()
 
     def _fill_fonts(self) -> None:
         engine = self._engine_name()
@@ -777,66 +1123,21 @@ class MeowText(App):
             return
         fonts = list_fonts(engine)
         self._by_id = {font.id: font for font in fonts}
-        families = group_fonts(fonts)
-        self._families = families
-        self._family_by_key = {family.key: family for family in families}
-        query = self.query_one("#filter", Input).value.strip().lower()
-        matched = families
-        if query:
-            matched = [
-                family
-                for family in families
-                if query in family.stem.lower()
-                or any(query in member.name.lower() or query in Path(member.source).name.lower() for member in family.members)
-            ]
-        options = self.query_one("#font-list", OptionList)
-        options.clear_options()
-        rows: list[Option] = []
-        if engine == "tdf":
-            for kind, title in _KINDS:
-                group = [family for family in matched if family.kind == kind]
-                if kind == "color" and len(group) > 400:
-                    group = group[:400]
-                if not group:
-                    continue
-                rows.append(Option(title, id=f"header-{kind}", disabled=True))
-                rows.extend(Option(family.label(), id=family.key) for family in group)
-        else:
-            visible = matched[:1200]
-            rows.extend(Option(family.label(), id=family.key) for family in visible)
-        placeholder = self.query_one("#filter", Input)
-        shown = sum(1 for row in rows if row.id and not str(row.id).startswith("header"))
-        placeholder.placeholder = f"Filter {len(families)} fonts" if shown >= len(matched) else f"{shown} shown — keep typing"
-        if not rows:
-            self.font_id = None
-            self._render_preview()
-            return
-        options.add_options(rows)
-        ids = [str(row.id) for row in rows if row.id and not str(row.id).startswith("header")]
-        current = self._family_for_font(self.font_id or "")
-        if current is None or current.key not in ids:
-            current = self._family_by_key.get(self._default_family_key(matched))
-        if current is None:
-            return
-        self.font_id = self._picked.get(current.key, current.members[0].id)
-        self._updating = True
-        try:
-            options.highlighted = ids.index(current.key)
-        finally:
-            self._updating = False
-        self._show_variant(current)
+        self._families = group_fonts(fonts)
+        self._family_by_key = {family.key: family for family in self._families}
+        if self.font_id not in self._by_id:
+            self.font_id = self._default_font_id()
         self._render_preview()
 
-    def _default_family_key(self, families: list[FontFamily]) -> str:
+    def _default_font_id(self) -> str | None:
         wanted = {"figlet": "ansi shadow", "toilet": "future"}.get(self._engine_name())
-        if wanted:
-            for family in families:
-                if family.stem.lower() == wanted or any(member.name.lower() == wanted for member in family.members):
-                    return family.key
-        for family in families:
-            if not family.key.startswith("header"):
-                return family.key
-        return families[0].key
+        for family in self._families:
+            for member in family.members:
+                if wanted and member.name.lower() == wanted:
+                    return member.id
+        if self._families:
+            return self._families[0].members[0].id
+        return None
 
     def _index_tdf(self) -> None:
         load_tdf()
@@ -847,230 +1148,111 @@ class MeowText(App):
             self._fill_fonts()
 
     def _family_for_font(self, font_id: str) -> FontFamily | None:
-        if not font_id:
-            return None
         for family in self._families:
             if any(member.id == font_id for member in family.members):
                 return family
         return None
 
-    def _family_key(self) -> str:
-        family = self._family_for_font(self.font_id or "")
-        return family.key if family else ""
+    def _cycle_variant(self, delta: int) -> None:
+        family = self._current_family()
+        if family is None or len(family.members) < 2:
+            return
+        ids = [member.id for member in family.members]
+        current = self._picked.get(family.key, ids[0])
+        index = ids.index(current) if current in ids else 0
+        chosen = ids[(index + delta) % len(ids)]
+        self._picked[family.key] = chosen
+        self.font_id = chosen
+        self._letters.clear()
+        self._patches.clear()
+        self._refresh_board()
+        self._render_preview()
 
     def _current_family(self) -> FontFamily | None:
         return self._family_for_font(self.font_id or "")
 
-    def _show_variant(self, family: FontFamily) -> None:
-        cycle = self.query_one("#variant", Cycle)
-        if len(family.members) < 2:
-            cycle.display = False
+    def _index_of_current_font(self) -> int:
+        family = self._current_family()
+        matched = self._filtered_fonts()
+        if family is None:
+            return 0
+        for index, item in enumerate(matched):
+            if item.key == family.key:
+                return index
+        return 0
+
+    def _filtered_fonts(self) -> list[FontFamily]:
+        query = self.query_one("#filter", Input).value.strip().lower()
+        if not query:
+            return list(self._families)
+        return [
+            family
+            for family in self._families
+            if query in family.stem.lower()
+            or any(query in member.name.lower() or query in Path(member.source).name.lower() for member in family.members)
+        ]
+
+    def _move_font(self, delta: int) -> None:
+        matched = self._filtered_fonts()
+        if not matched:
+            self._show_matches()
             return
-        options = [(member.name, member.id) for member in family.members]
+        self._font_at = (self._font_at + delta) % len(matched)
+        family = matched[self._font_at]
         chosen = self._picked.get(family.key, family.members[0].id)
         if chosen not in {member.id for member in family.members}:
             chosen = family.members[0].id
-        self._updating = True
-        try:
-            cycle.set_options(options, chosen)
-            cycle.display = True
-        finally:
-            self._updating = False
-
-    def _apply_preset(self, name: str) -> None:
-        style = self._presets.get(name)
-        if style is None:
-            return
-        self._stops = style.stops
-        self._outline_stops = style.outline_stops
-        self._bands = style.bands
-        self._outline_bands = style.outline_bands
-        self._set_style_widgets(style)
-        self._sync_stops()
+        self.font_id = chosen
+        self._picked[family.key] = chosen
+        self._letters.clear()
+        self._patches.clear()
+        self._show_matches()
         self._render_preview()
 
-    def _set_style_widgets(self, style: BannerStyle) -> None:
-        self._updating = True
-        try:
-            self.query_one("#gradient", Switch).value = style.gradient is not None
-            self.query_one("#gradient-label", Label).update("Gradient on" if style.gradient else "Gradient off")
-            palette = "edited" if style.stops else (style.gradient if style.gradient in self._palettes else "rainbow")
-            self.query_one("#palette", Cycle).set_value(palette if style.gradient or style.stops else "rainbow")
-            self.query_one("#direction", Cycle).set_value(style.direction)
-            self.query_one("#outline", Switch).value = style.outline
-            self.query_one("#outline-label", Label).update("Outline on" if style.outline else "Outline off")
-            self.query_one("#outline-mode", Cycle).set_value(style.outline_mode)
-            self._ensure_symbol(style.outline_char)
-            self.query_one("#symbol", Cycle).set_value(style.outline_char)
-            self.query_one("#outline-colour", Cycle).set_value(colour_name(style.outline_color))
-            outline_gradient = "edited" if style.outline_stops else (style.outline_gradient or "off")
-            self.query_one("#outline-gradient", Cycle).set_value(outline_gradient)
-            self.query_one("#outline-direction", Cycle).set_value(style.outline_direction)
-            self.query_one("#outline-speed", Cycle).set_value(self._nearest_speed(style.outline_speed))
-            self.query_one("#outline-distance", Cycle).set_value(str(style.outline_distance))
-            self.query_one("#outline-place", Cycle).set_value(style.outline_place)
-            self.query_one("#outline-scope", Cycle).set_value(style.outline_scope)
-            for side, widget_id in (("t", "side-t"), ("b", "side-b"), ("l", "side-l"), ("r", "side-r")):
-                self.query_one(f"#{widget_id}", Switch).value = side in (style.outline_sides or "tblr")
-            self.query_one("#odx", Input).value = str(style.outline_dx)
-            self.query_one("#ody", Input).value = str(style.outline_dy)
-            self.query_one("#shadow", Switch).value = style.shadow
-            self.query_one("#shadow-label", Label).update("Shadow on" if style.shadow else "Shadow off")
-            self.query_one("#dx", Input).value = str(style.shadow_dx)
-            self.query_one("#dy", Input).value = str(style.shadow_dy)
-            self.query_one("#shadow-colour", Cycle).set_value(colour_name(style.shadow_color))
-            self.query_one("#shadow-symbol", Cycle).set_value(style.shadow_char or "same")
-        finally:
-            self._updating = False
-
-    def _after_style_edit(self) -> None:
-        self._sync_preset_selection()
-        self._render_preview()
-
-    def _sync_preset_selection(self) -> None:
-        style = self._style()
-        match = next((name for name, preset in self._presets.items() if preset == style), "custom")
-        preset = self.query_one("#preset", Cycle)
-        if match not in {value for _, value in preset.options}:
-            options = list(preset.options)
-            if not any(value == "custom" for _, value in options):
-                options.append(("Custom", "custom"))
-            self._updating = True
-            try:
-                preset.set_options(options, match)
-            finally:
-                self._updating = False
+    def _show_matches(self) -> None:
+        matched = self._filtered_fonts()
+        view = self.query_one("#matches", Static)
+        if not matched:
+            view.update("No fonts match.")
+            view.display = True
             return
-        if preset.value == match:
-            return
-        self._updating = True
-        try:
-            preset.set_value(match)
-        finally:
-            self._updating = False
-
-    def _sync_suffix(self) -> None:
-        fmt = self._choice("format", "ansi")
-        suffix = _SUFFIX.get(fmt)
-        if suffix is None:
-            return
-        current = Path(self.query_one("#path", Input).value or "banner.ans")
-        if current.suffix == ".meowtext":
-            return
-        self._updating = True
-        try:
-            self.query_one("#path", Input).value = str(current.with_suffix(suffix))
-        finally:
-            self._updating = False
-
-    def _style(self) -> BannerStyle:
-        gradient_on = self.query_one("#gradient", Switch).value
-        palette = self._choice("palette", "rainbow")
-        outline_gradient = self._choice("outline-gradient", "off")
-        shadow_symbol = self._choice("shadow-symbol", "same")
-        sides = "".join(
-            side
-            for side, widget_id in (("t", "side-t"), ("b", "side-b"), ("l", "side-l"), ("r", "side-r"))
-            if self.query_one(f"#{widget_id}", Switch).value
-        )
-        return BannerStyle(
-            gradient=None if not gradient_on else ("rainbow" if palette == "edited" else palette),
-            direction=self._choice("direction", "horizontal"),
-            stops=self._stops,
-            bands=self._bands,
-            outline=self.query_one("#outline", Switch).value,
-            outline_char=self._choice("symbol", "░"),
-            outline_color=COLOURS.get(self._choice("outline-colour", "slate"), DEFAULT_OUTLINE),
-            outline_mode=self._choice("outline-mode", "shade"),
-            outline_gradient=None if outline_gradient in {"off", "edited"} else outline_gradient,
-            outline_stops=self._outline_stops,
-            outline_direction=self._choice("outline-direction", "horizontal"),
-            outline_speed=float(self._choice("outline-speed", "1") or 1),
-            outline_bands=self._outline_bands,
-            outline_sides=sides,
-            outline_distance=int(self._choice("outline-distance", "0") or 0),
-            outline_place=self._choice("outline-place", "both"),
-            outline_scope=self._choice("outline-scope", "word"),
-            outline_dx=self._number("odx", 0),
-            outline_dy=self._number("ody", 0),
-            shadow=self.query_one("#shadow", Switch).value,
-            shadow_dx=self._number("dx", 1),
-            shadow_dy=self._number("dy", 1),
-            shadow_color=COLOURS.get(self._choice("shadow-colour", "ink"), DEFAULT_SHADOW),
-            shadow_char=None if shadow_symbol == "same" else shadow_symbol,
-        )
-
-    def _read_animation(self) -> None:
-        self._animation = Animation(
-            name=self._choice("animation", "none"),
-            speed=float(self._choice("anim-speed", "1") or 1),
-            direction=self._choice("anim-direction", "forward"),
-            travel=int(self._choice("anim-travel", "360") or 360),
-            layers=self._choice("anim-layers", "all"),
-            pattern=self._choice("trace-pattern", "outline"),
-            reveal=self._choice("trace-reveal", "draw"),
-        )
-
-    def _write_animation(self, motion: Animation) -> None:
-        self._animation = motion.clone()
-        self._updating = True
-        try:
-            self.query_one("#animation", Cycle).set_value(motion.name if motion.name in {value for _, value in ANIMATIONS} else "none")
-            self.query_one("#anim-speed", Cycle).set_value(self._nearest_speed(motion.speed))
-            self.query_one("#anim-direction", Cycle).set_value(motion.direction)
-            travel = str(motion.travel if str(motion.travel) in {value for _, value in ANIM_TRAVELS} else 360)
-            self.query_one("#anim-travel", Cycle).set_value(travel)
-            self.query_one("#anim-layers", Cycle).set_value(motion.layers)
-            self.query_one("#trace-pattern", Cycle).set_value(motion.pattern)
-            self.query_one("#trace-reveal", Cycle).set_value(motion.reveal)
-        finally:
-            self._updating = False
-        self._set_animation(self._animation.name)
-
-    def _nearest_speed(self, speed: float) -> str:
-        choices = [float(value) for _, value in ANIM_SPEEDS]
-        nearest = min(choices, key=lambda item: abs(item - speed))
-        return str(int(nearest)) if nearest == int(nearest) else str(nearest)
-
-    def _set_animation(self, name: str) -> None:
-        self._animation.name = name if name in {item for _, item in ANIMATIONS} else "none"
-        self._frame = 0
-        if self._anim_timer is not None:
-            self._anim_timer.stop()
-            self._anim_timer = None
-        if self._animation.name != "none":
-            self._anim_timer = self.set_interval(0.12, self._tick_animation)
-        self._render_preview()
-
-    def _tick_animation(self) -> None:
-        self._frame += 1
-        self._render_preview()
-
-    def _number(self, widget_id: str, default: int) -> int:
-        raw = self.query_one(f"#{widget_id}", Input).value.strip()
-        try:
-            value = int(raw)
-        except ValueError:
-            return default
-        return max(-8, min(8, value))
+        self._font_at = min(self._font_at, len(matched) - 1)
+        start = max(0, min(self._font_at - 2, len(matched) - 5))
+        lines = [f"{len(matched)} fonts · type to narrow · up down · pgup pgdn · enter keeps"]
+        for index in range(start, min(start + 5, len(matched))):
+            mark = "▸ " if index == self._font_at else "  "
+            lines.append(mark + matched[index].label())
+        view.update("\n".join(lines))
+        view.display = True
 
     def _render_preview(self) -> None:
+        if not self._ui_ready or self._rendering:
+            return
+        self._rendering = True
+        try:
+            self._draw_preview()
+        except Exception as exc:
+            self._report_crash(exc)
+        finally:
+            self._rendering = False
+
+    def _report_crash(self, exc: Exception) -> None:
+        message = str(exc).strip() or exc.__class__.__name__
+        try:
+            self.query_one("#meta", Static).update(message)
+            self.notify(message, severity="error")
+        except Exception:
+            return
+
+    def _draw_preview(self) -> None:
         style = self._style()
-        self._enable_controls(style)
         font = self._by_id.get(self.font_id or "")
         preview = self.query_one("#preview", Static)
         meta = self.query_one("#meta", Static)
         if font is None:
             self.last_banner = None
             self._source = None
-            self._sync_roles(Grid())
-            message = "No font selected."
-            if self._engine_name() == "tdf" and not tdf_ready():
-                message = "Indexing TheDraw fonts…"
-            elif self._engine_name() == "tdf" and tdf_ready() and not self._families:
-                message = "No TheDraw fonts in ~/.config/tdfgo/fonts"
-            preview.update(message)
-            meta.update(message)
+            meta.update("No font selected." if self._families or self._engine_name() != "tdf" else "Indexing TheDraw fonts…")
             return
         text = self.query_one("#text", Input).value
         try:
@@ -1113,14 +1295,28 @@ class MeowText(App):
                 )
         except RenderError as exc:
             self.last_banner = None
-            preview.update(Text(str(exc), style="italic #a8a8a8"))
-            meta.update(Text(str(exc), style="red"))
+            preview.update(self._centered_line(str(exc), "italic #a8a8a8"))
+            meta.update(str(exc))
             return
         self.last_banner = banner
-        self._sync_roles(self._source or Grid())
+        self._note_roles()
         self._show_frame()
         meta.update(self._describe(banner))
         self._refresh_paint_bar()
+
+    def _note_roles(self) -> None:
+        source = self._source or Grid()
+        slots = used_slots(source)
+        if slots:
+            self._relations.ensure(source)
+        signature = tuple(slots)
+        if signature != self._role_sig:
+            self._role_sig = signature
+            if slots and self.knobs.get("role") not in {str(slot) for slot in slots}:
+                self.knobs["role"] = str(slots[0])
+            self._sync_role_numbers()
+            if self._section == "colour":
+                self._refresh_board()
 
     def _show_frame(self) -> None:
         preview = self.query_one("#preview", Static)
@@ -1129,363 +1325,58 @@ class MeowText(App):
         if banner is None:
             return
         if not text:
-            preview.update(Text("Type a banner.", style="italic #888"))
+            preview.update(self._centered_line("Type a banner. Ctrl-t jumps to the words.", "italic #888"))
             return
         if not banner.grid.rows:
-            preview.update(Text("Nothing to draw.", style="italic #888"))
+            preview.update(self._centered_line("Nothing to draw.", "italic #888"))
             return
-        focus = self._selected_slot() if self.query_one("#focus-role", Switch).value else None
+        focus = self._selected_slot() if self.knobs.get("focus-role") == "on" else None
         cursor = self._cursor if self._paint and self._paint_target == "banner" else None
-        preview.update(to_rich(banner.grid, focus, cursor))
+        width, height = self._view_size()
+        across = max(0, (width - banner.grid.width) // 2)
+        down = max(0, (height - banner.grid.height) // 2)
+        preview.update(to_rich(banner.grid, focus, cursor, (across, down)))
+        self._center_scroll(banner.grid.width, banner.grid.height, across, down)
 
-    def _enable_controls(self, style: BannerStyle) -> None:
-        self.query_one("#palette", Cycle).disabled = style.gradient is None and self._stops is None
-        self.query_one("#direction", Cycle).disabled = style.gradient is None and self._stops is None
-        outlined = style.outline
-        adaptive = style.outline_mode in {"contour", "heavy", "double", "blocks"}
-        for widget_id in (
-            "outline-mode",
-            "outline-colour",
-            "outline-gradient",
-            "outline-direction",
-            "outline-speed",
-            "outline-distance",
-            "outline-place",
-            "outline-scope",
-        ):
-            self.query_one(f"#{widget_id}", Cycle).disabled = not outlined
-        self.query_one("#symbol", Cycle).disabled = (not outlined) or adaptive
+    def _view_size(self) -> tuple[int, int]:
+        view = self.query_one("#stage-scroll", ScrollableContainer)
+        return view.size.width, view.size.height
 
-    def _active_stops(self) -> tuple[Color, ...]:
-        which = self._choice("grad-which", "letters")
-        if which == "outline":
-            if self._outline_stops:
-                return self._outline_stops
-            name = self._choice("outline-gradient", "off")
-            if name in self._palettes:
-                return self._palettes[name]
-            return self._palettes.get("rainbow", (Color(255, 0, 64), Color(0, 190, 255)))
-        if self._stops:
-            return self._stops
-        name = self._choice("palette", "rainbow")
-        if name in self._palettes:
-            return self._palettes[name]
-        return self._palettes.get("rainbow", (Color(255, 0, 64), Color(0, 190, 255)))
+    def _centered_line(self, message: str, style: str) -> Text:
+        width, height = self._view_size()
+        text = Text()
+        down = max(0, (height - 1) // 2)
+        across = max(0, (width - len(message)) // 2)
+        if down:
+            text.append("\n" * down)
+        if across:
+            text.append(" " * across)
+        text.append(message, style=style)
+        return text
 
-    def _store_stops(self, stops: tuple[Color, ...]) -> None:
-        if self._choice("grad-which", "letters") == "outline":
-            self._outline_stops = stops
-            self.query_one("#outline", Switch).value = True
-            self._updating = True
-            try:
-                self.query_one("#outline-gradient", Cycle).set_value("edited")
-            finally:
-                self._updating = False
+    def _center_scroll(self, grid_width: int, grid_height: int, across: int, down: int) -> None:
+        view = self.query_one("#stage-scroll", ScrollableContainer)
+        width, height = view.size
+        if self._paint and self._paint_target == "banner":
+            target = (max(0, self._cursor[0] + across - width // 2), max(0, self._cursor[1] + down - height // 2))
         else:
-            self._stops = stops
-            self.query_one("#gradient", Switch).value = True
-            self._updating = True
-            try:
-                self.query_one("#palette", Cycle).set_value("edited")
-            finally:
-                self._updating = False
-
-    def _sync_stops(self) -> None:
-        stops = self._active_stops()
-        cycle = self.query_one("#stop", Cycle)
-        options = [(f"Stop {index + 1}", str(index)) for index in range(len(stops))]
-        current = cycle.value if cycle.value in {value for _, value in options} else "0"
-        which = self._choice("grad-which", "letters")
-        bands = self._outline_bands if which == "outline" else self._bands
-        self._updating = True
-        try:
-            cycle.set_options(options, current)
-            self.query_one("#blend", Cycle).set_value("bands" if bands else "smooth")
-            index = int(current)
-            hue, sat, val = rgb_to_hsv(stops[index])
-            self._set_quiet("#stop-h", str(int(round(hue)) % 360))
-            self._set_quiet("#stop-s", str(int(round(sat * 100))))
-            self._set_quiet("#stop-v", str(int(round(val * 100))))
-        finally:
-            self._updating = False
-
-    def _set_stop_from_inputs(self) -> None:
-        stops = list(self._active_stops())
-        try:
-            index = int(self._choice("stop", "0"))
-            hue = float(self.query_one("#stop-h", Input).value)
-            sat = float(self.query_one("#stop-s", Input).value) / 100
-            val = float(self.query_one("#stop-v", Input).value) / 100
-        except ValueError:
-            return
-        if index < 0 or index >= len(stops):
-            return
-        current_h, current_s, current_v = rgb_to_hsv(stops[index])
-        if (
-            abs((hue % 360) - current_h) < 0.51
-            and abs(sat - current_s) < 0.005
-            and abs(val - current_v) < 0.005
-        ):
-            return
-        colour = hsv_to_rgb(hue, sat, val)
-        stops[index] = colour
-        self._store_stops(tuple(stops))
-        self._after_style_edit()
-
-    def _add_stop(self) -> None:
-        stops = list(self._active_stops())
-        stops.append(stops[-1] if stops else Color(255, 255, 255))
-        self._store_stops(tuple(stops))
-        self._sync_stops()
-        self._after_style_edit()
-
-    def _remove_stop(self) -> None:
-        stops = list(self._active_stops())
-        if len(stops) <= 2:
-            self.notify("A gradient keeps at least two stops")
-            return
-        try:
-            index = int(self._choice("stop", "0"))
-        except ValueError:
-            index = len(stops) - 1
-        del stops[max(0, min(index, len(stops) - 1))]
-        self._store_stops(tuple(stops))
-        self._sync_stops()
-        self._after_style_edit()
-
-    def _save_palette(self) -> None:
-        name = self.query_one("#palette-name", Input).value.strip().lower()
-        if not name:
-            self.notify("Name the palette first", severity="warning")
-            return
-        stops = self._active_stops()
-        save_palette(name, stops)
-        self._palettes = dict(load_palettes())
-        self._refresh_palette_cycles()
-        if self._choice("grad-which", "letters") == "outline":
-            self._outline_stops = None
-            self.query_one("#outline-gradient", Cycle).set_value(name)
-        else:
-            self._stops = None
-            self.query_one("#palette", Cycle).set_value(name)
-        self.notify(f"Palette {name} saved")
-        self._after_style_edit()
-
-    def _refresh_palette_cycles(self) -> None:
-        self.query_one("#palette", Cycle).set_options(self._palette_options(), self._choice("palette", "rainbow"))
-        self.query_one("#outline-gradient", Cycle).set_options(
-            self._palette_options(off=True), self._choice("outline-gradient", "off")
-        )
-
-    def _save_preset(self) -> None:
-        name = self.query_one("#preset-name", Input).value.strip().lower()
-        if not name:
-            self.notify("Name the look first", severity="warning")
-            return
-        save_preset(name, self._style())
-        self._presets = load_presets()
-        options = tuple((item.title(), item) for item in self._presets)
-        self.query_one("#preset", Cycle).set_options(options, name)
-        self.notify(f"Look {name} saved")
-
-    def _add_symbol(self) -> None:
-        char = self.query_one("#custom-symbol", Input).value.strip()[:1]
-        if not char:
-            self.notify("Type the symbol first", severity="warning")
-            return
-        save_symbol(char)
-        self._symbols = load_symbols()
-        self.query_one("#symbol", Cycle).set_options(self._symbols, char)
-        shadow = list(self.query_one("#shadow-symbol", Cycle).options)
-        if char not in {value for _, value in shadow}:
-            shadow.append((f"yours {char}", char))
-        self.query_one("#shadow-symbol", Cycle).set_options(shadow, self._choice("shadow-symbol", "same"))
-        self.notify(f"Added {char}")
-        self._after_style_edit()
-
-    def _ensure_symbol(self, char: str) -> None:
-        cycle = self.query_one("#symbol", Cycle)
-        if char in {value for _, value in cycle.options}:
-            return
-        options = list(cycle.options)
-        options.append((char, char))
-        cycle.set_options(options, char)
-
-    def _reload_favourites(self) -> None:
-        options = self.query_one("#favourites", OptionList)
-        options.clear_options()
-        paths = list_favourites()
-        if paths:
-            options.add_options(Option(path.stem, id=str(path)) for path in paths)
-
-    def _nudge_hue(self, delta: float) -> None:
-        self._relations.hue = (self._relations.hue + delta) % 360
-        self._set_quiet("#hue", str(int(round(self._relations.hue)) % 360))
-        self._render_preview()
-
-    def _set_hue_from_input(self) -> None:
-        try:
-            hue = float(self.query_one("#hue", Input).value) % 360
-        except ValueError:
-            return
-        if abs(hue - (self._relations.hue % 360)) < 0.5:
-            return
-        self._relations.hue = hue
-        self._render_preview()
-
-    def _toggle_link(self, linked: bool) -> None:
-        slot = self._selected_slot()
-        if slot is None or slot not in self._relations.roles:
-            return
-        role = self._relations.roles[slot]
-        if role.linked == linked:
-            return
-        if linked:
-            self._relations.link_role(slot)
-        else:
-            self._relations.break_role(slot)
-        self._role_sig = None
-        self._render_preview()
-
-    def _set_role_from_inputs(self) -> None:
-        slot = self._selected_slot()
-        if slot is None or slot not in self._relations.roles:
-            return
-        role = self._relations.roles[slot]
-        if role.linked:
-            return
-        try:
-            hue = float(self.query_one("#role-h", Input).value)
-            sat = float(self.query_one("#role-s", Input).value) / 100
-            val = float(self.query_one("#role-v", Input).value) / 100
-        except ValueError:
-            return
-        if (
-            abs((hue % 360) - role.hue) < 0.51
-            and abs(sat - role.sat) < 0.005
-            and abs(val - role.val) < 0.005
-        ):
-            return
-        self._relations.set_hsv(slot, hue, sat, val)
-        self._role_sig = None
-        self._render_preview()
-
-    def _split_role(self) -> None:
-        slot = self._selected_slot()
-        if slot is None or self._source is None or slot not in self._relations.roles:
-            return
-        made = self._relations.split(self._source, slot)
-        name = self._relations.roles[slot].name
-        if made == 0:
-            self.notify(f"{name} is already one section")
-        else:
-            self.notify(f"Split {name} into {made + 1} sections")
-        self._role_sig = None
-        self._render_preview()
-
-    def _arm_focus(self) -> None:
-        switch = self.query_one("#focus-role", Switch)
-        if switch.value:
-            return
-        self._updating = True
-        try:
-            switch.value = True
-        finally:
-            self._updating = False
-
-    def _selected_slot(self) -> int | None:
-        value = self.query_one("#role", Select).value
-        if value is Select.NULL or value is None:
-            return None
-        try:
-            slot = int(value)
-        except (TypeError, ValueError):
-            return None
-        return None if slot < 0 else slot
-
-    def _sync_roles(self, source: Grid) -> None:
-        row = self.query_one("#relations")
-        slots = used_slots(source)
-        if not slots:
-            row.display = False
-            return
-        self._relations.ensure(source)
-        row.display = True
-        signature = tuple(
-            (
-                slot,
-                self._relations.roles[slot].name,
-                self._relations.roles[slot].linked,
-                self._relations.color(slot).hex(),
-                *role_place(source, slot),
+            target = (
+                0 if across else max(0, (grid_width - width) // 2),
+                0 if down else max(0, (grid_height - height) // 2),
             )
-            for slot in slots
-        )
-        if signature != self._role_sig:
-            options = []
-            for slot, name, linked, hex_color, sections, where in signature:
-                label = Text()
-                label.append("█ ", style=hex_color)
-                note = name if linked else f"{name} · own"
-                extra = f" · {sections} sections" if sections > 1 else ""
-                label.append(f"{note} · {where}{extra}")
-                options.append((label, slot))
-            select = self.query_one("#role", Select)
-            current = select.value
-            self._updating = True
-            try:
-                before = select.value
-                select.set_options(options)
-                if select.value != before:
-                    self._role_echoes += 1
-                if current in slots and select.value != current:
-                    select.value = current
-                    self._role_echoes += 1
-            finally:
-                self._updating = False
-            self._role_sig = signature
-        self._show_role_editor()
-        role = self._relations.roles.get(self._selected_slot() or -1)
-        locked = role is None or role.linked
-        for widget_id in ("role-h", "role-s", "role-v"):
-            self.query_one(f"#{widget_id}").disabled = locked
-
-    def _show_role_editor(self) -> None:
-        slot = self._selected_slot()
-        if slot is None or slot not in self._relations.roles:
+        anchor = (target, width, height, grid_width, grid_height)
+        if anchor == self._anchor:
             return
-        role = self._relations.roles[slot]
-        if role.linked:
-            hue, sat, val = rgb_to_hsv(role.paint(self._relations.hue))
-        else:
-            hue, sat, val = role.hue, role.sat, role.val
-        link = self.query_one("#link", Switch)
-        if link.value != role.linked:
-            self._updating = True
+        self._anchor = anchor
+        view.scroll_to(target[0], target[1], animate=False)
+
+    def on_resize(self, event) -> None:
+        self._anchor = None
+        if self._ui_ready and self.last_banner is not None and not self._rendering:
             try:
-                link.value = role.linked
-            finally:
-                self._updating = False
-        self._set_quiet("#role-h", str(int(round(hue)) % 360))
-        self._set_quiet("#role-s", str(int(round(sat * 100))))
-        self._set_quiet("#role-v", str(int(round(val * 100))))
-        shown = str(int(round(self._relations.hue)) % 360)
-        if self.query_one("#hue", Input).value != shown and not self._hue_focused():
-            self._set_quiet("#hue", shown)
-
-    def _hue_focused(self) -> bool:
-        focused = self.focused
-        return isinstance(focused, Input) and focused.id == "hue"
-
-    def _set_quiet(self, selector: str, value: str) -> None:
-        widget = self.query_one(selector, Input)
-        if widget.value == value:
-            return
-        self._updating = True
-        try:
-            widget.value = value
-        finally:
-            self._updating = False
+                self._show_frame()
+            except Exception as exc:
+                self._report_crash(exc)
 
     def _describe(self, banner: Banner) -> str:
         if not banner.grid.rows:
@@ -1499,16 +1390,6 @@ class MeowText(App):
             parts.append("used the other letter case")
         if banner.missing:
             parts.append("missing " + "".join(banner.missing[:16]))
-        source = self._source or Grid()
-        if used_slots(source):
-            parts.append(f"hue {int(round(self._relations.hue)) % 360}°")
-            own = sum(1 for slot in used_slots(source) if slot in self._relations.roles and not self._relations.roles[slot].linked)
-            if own:
-                parts.append(f"{own} edited alone")
-            if self.query_one("#focus-role", Switch).value:
-                slot = self._selected_slot()
-                if slot is not None and slot in self._relations.roles:
-                    parts.append(f"showing {self._relations.roles[slot].name}")
         if self._paint:
             parts.append("painting the banner" if self._paint_target == "banner" else f"painting {self._letter}")
         return " · ".join(parts)
@@ -1530,7 +1411,7 @@ class MeowText(App):
             x = min(width - 1, x + 1)
         elif key == "up":
             y = max(0, y - 1)
-        elif key == "down":
+        else:
             y = min(height - 1, y + 1)
         if self._paint_target == "letter":
             self._letter_cursor = (x, y)
@@ -1544,8 +1425,7 @@ class MeowText(App):
         if self._paint_target == "letter":
             glyph = self._ensure_letter(self._letter)
             x, y = self._letter_cursor
-            existing = glyph.get(x, y)
-            painted = existing.clone()
+            painted = glyph.get(x, y).clone()
             painted.char = char
             if colour is not None:
                 painted.fg = colour
@@ -1556,8 +1436,7 @@ class MeowText(App):
         if self.last_banner is None:
             return
         x, y = self._cursor
-        existing = self.last_banner.grid.get(x, y)
-        painted = existing.clone()
+        painted = self.last_banner.grid.get(x, y).clone()
         painted.char = char
         if colour is not None:
             painted.fg = colour
@@ -1569,12 +1448,9 @@ class MeowText(App):
         if glyph is not None and glyph.height:
             return glyph
         font = self._by_id.get(self.font_id or "")
-        if font is None:
+        glyph = layout_font(char, font)[0] if font is not None else Grid([[Cell(char)]])
+        if glyph.height == 0:
             glyph = Grid([[Cell(char)]])
-        else:
-            glyph, _missing, _folded = layout_font(char, font)
-            if glyph.height == 0:
-                glyph = Grid([[Cell(char)]])
         self._letters[char] = glyph
         return glyph
 
@@ -1609,25 +1485,7 @@ class MeowText(App):
             where = f"letter {self._letter} {self._letter_cursor[0]},{self._letter_cursor[1]}"
         else:
             where = f"banner {self._cursor[0]},{self._cursor[1]}"
-        bar.update(f"Paint {where} · colour {self._paint_colour} · [ ] colour · , . letter · tab switches")
-
-    def _nudge_input(self, widget: Input, delta: int) -> None:
-        step = 15 if widget.id in {"hue", "role-h", "stop-h"} else 5 if widget.id in {"role-s", "role-v", "stop-s", "stop-v"} else 1
-        try:
-            value = int(widget.value or "0")
-        except ValueError:
-            value = 0
-        widget.value = str(value + delta * step)
-
-    def _cycle_select(self, select: Select, delta: int) -> None:
-        values = [value for _prompt, value in select._options if value is not Select.NULL]  # type: ignore[attr-defined]
-        if not values:
-            return
-        try:
-            index = values.index(select.value)
-        except ValueError:
-            index = 0
-        select.value = values[(index + delta) % len(values)]
+        bar.update(f"Paint {where} · colour {self._paint_colour} · [ ] colour · , . letter · tab switches · esc stops")
 
 
 def _plain(grid: Grid) -> str:

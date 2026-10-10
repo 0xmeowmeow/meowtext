@@ -8,6 +8,7 @@ one the editor shows.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from meowtext.effects import PALETTES, PRESETS, SYMBOLS, BannerStyle
@@ -16,7 +17,7 @@ from meowtext.project import Project, dumps_project, load_project, project_filen
 
 
 def config_dir() -> Path:
-    path = Path.home() / ".config" / "meowtext"
+    path = Path(os.environ["MEOWTEXT_HOME"]) if os.environ.get("MEOWTEXT_HOME") else Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "meowtext"
     path.mkdir(parents=True, exist_ok=True)
     return path
 

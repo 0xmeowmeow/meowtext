@@ -131,6 +131,42 @@ class GridTests(unittest.TestCase):
         self.assertEqual(drawn.get(1, 0).char, " ")
         self.assertEqual(drawn.get(2, 0).char, " ")
 
+    def test_hue_rotates_in_place_and_march_slides(self) -> None:
+        from meowtext.compose import present
+        from meowtext.effects import Animation, animation_phase
+        from meowtext.palette import rotate_hue
+
+        grid = Grid([[Cell("X") for _ in range(8)]])
+        style = BannerStyle(gradient="rainbow")
+        still = present(grid, style, animation=Animation(name="hue"), frame=0)
+        spun = present(grid, style, animation=Animation(name="hue"), frame=10)
+        slid = present(grid, style, animation=Animation(name="march"), frame=10)
+        _, degrees = animation_phase(10, 360)
+        self.assertEqual(spun.get(0, 0).fg, rotate_hue(still.get(0, 0).fg, degrees))
+        self.assertEqual(spun.get(7, 0).fg, rotate_hue(still.get(7, 0).fg, degrees))
+        self.assertNotEqual(slid.get(0, 0).fg, spun.get(0, 0).fg)
+
+    def test_outline_can_run_the_opposite_way_to_the_letters(self) -> None:
+        column = Grid([[Cell("#")] for _ in range(5)])
+        styled = apply_style(
+            column,
+            BannerStyle(
+                gradient="ice",
+                direction="vertical",
+                outline=True,
+                outline_gradient="ice",
+                outline_direction="opposite",
+            ),
+        )
+        # Margin of one: the letters sit in the middle column, with a rim above and below.
+        top_letter = styled.get(1, 1).fg
+        bottom_letter = styled.get(1, 5).fg
+        top_rim = styled.get(1, 0).fg
+        bottom_rim = styled.get(1, 6).fg
+        assert top_letter and bottom_letter and top_rim and bottom_rim
+        self.assertLess(top_letter.b, bottom_letter.b)
+        self.assertGreater(top_rim.b, bottom_rim.b)
+
 
 class TdfTests(unittest.TestCase):
     def test_color_block_outline_and_a_second_font(self) -> None:
@@ -319,6 +355,12 @@ class ToolTests(unittest.TestCase):
         from meowtext.effects import BannerStyle
 
         banner = render_banner("Hi", "figlet", "small", BannerStyle(gradient="mono"))
+        from meowtext.engines import figlet as figlet_engine
+
+        if "Jerusalem" in figlet_engine.font_names():
+            wide = figlet_engine.render("meow", "Jerusalem")
+            self.assertLess(wide.width, 200)
+            self.assertGreater(wide.width, 5)
         self.assertGreater(banner.grid.width, 1)
         self.assertTrue(any(cell.fg is not None for row in banner.grid.rows for cell in row))
         toilet = render_banner("Hi", "toilet", "future")

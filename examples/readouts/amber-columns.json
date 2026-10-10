@@ -1,0 +1,10 @@
+{
+  "name": "amber-columns",
+  "style": "points",
+  "layout": "columns",
+  "ink": "amber",
+  "source": "file:columns.txt",
+  "format": "lines",
+  "range": [0, 1],
+  "count": 64
+}

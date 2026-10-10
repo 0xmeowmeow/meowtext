@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reference boards</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #101114;
+    --panel: #181a20;
+    --line: #2c3038;
+    --ink: #e8e6e3;
+    --muted: #9aa1ab;
+    --gold: #e6b450;
+    --gold-ink: #1a1408;
+    --dim: #5c6370;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.45 "IBM Plex Sans", "Source Sans 3", sans-serif;
+    min-height: 100vh;
+  }
+  a { color: inherit; }
+  button, textarea, input { font: inherit; color: inherit; }
+  header.top {
+    display: flex;
+    gap: 1rem;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: 0.85rem 1.25rem;
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    background: rgba(16, 17, 20, 0.94);
+    z-index: 5;
+  }
+  header.top a.brand { text-decoration: none; font-weight: 650; letter-spacing: 0.01em; }
+  header.top nav { display: flex; gap: 1rem; align-items: baseline; }
+  header.top nav a { color: var(--muted); text-decoration: none; }
+  header.top nav a.here { color: var(--gold); }
+  main { padding: 1.25rem; }
+  h1 { font-size: 1.7rem; font-weight: 650; margin: 0 0 0.35rem; }
+  h2 { font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin: 1.6rem 0 0.7rem; }
+  .lede { max-width: 42rem; color: var(--muted); margin: 0 0 1rem; }
+  input[type="search"], textarea {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.45rem 0.65rem;
+    width: 100%;
+  }
+  textarea { min-height: 7.5rem; resize: vertical; line-height: 1.45; }
+  input[type="search"] { max-width: 28rem; }
+  .cards, .folders, .sheet {
+    display: grid;
+    gap: 0.75rem;
+  }
+  .cards { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  .folders { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); margin-bottom: 1.25rem; }
+  .sheet { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  a.card, a.folder {
+    display: block;
+    text-decoration: none;
+    background: var(--panel);
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid transparent;
+  }
+  a.card:hover, a.folder:hover, a.card:focus-visible, a.folder:focus-visible {
+    border-color: var(--gold);
+  }
+  a.card img, a.folder img, .tile img, .stage img, .brief-item img {
+    display: block;
+    width: 100%;
+    background: #000;
+    object-fit: contain;
+  }
+  a.card img { aspect-ratio: 16 / 10; }
+  a.folder img { aspect-ratio: 4 / 3; }
+  .card div, .folder div { padding: 0.55rem 0.7rem 0.7rem; }
+  .card strong, .folder strong { display: block; overflow-wrap: anywhere; }
+  .card span, .folder span, .quiet { color: var(--muted); font-size: 0.85rem; }
+  .marked { color: var(--gold); }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    gap: 1rem;
+    align-items: start;
+  }
+  .rail {
+    position: sticky;
+    top: 3.4rem;
+    max-height: calc(100vh - 4rem);
+    overflow: auto;
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 0.75rem;
+  }
+  .stage {
+    background: #000;
+    border-radius: 6px;
+    min-height: 160px;
+    display: grid;
+    place-items: center;
+  }
+  .stage img { max-height: 46vh; }
+  .rail h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0.7rem 0 0.55rem;
+    overflow-wrap: anywhere;
+  }
+  .choices { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; }
+  button.choice, .chips button {
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.28rem 0.75rem;
+    cursor: pointer;
+  }
+  button.choice kbd {
+    font-weight: 700;
+    margin-right: 0.35rem;
+    color: var(--gold);
+  }
+  button.choice.on-in { background: var(--gold); color: var(--gold-ink); border-color: var(--gold); }
+  button.choice.on-in kbd { color: var(--gold-ink); }
+  button.choice.on-out { background: #2c3038; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 0.8rem; }
+  .chips button.on { border-color: var(--gold); color: var(--gold); }
+  .tile {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 6px;
+  }
+  .tile img {
+    aspect-ratio: 4 / 3;
+    border-radius: 6px;
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+  }
+  .tile.selected img { outline-color: #f4f1ea; }
+  .tile.included img { outline-color: var(--gold); }
+  .tile.out { opacity: 0.38; }
+  .tile .cap {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tile, a.folder { scroll-margin-top: 4.2rem; }
+  .crumbs { display: flex; flex-wrap: wrap; gap: 0.35rem; color: var(--muted); margin-bottom: 0.4rem; }
+  .crumbs a { color: var(--muted); }
+  .status { min-height: 1.2rem; color: var(--dim); font-size: 0.85rem; margin: 0.35rem 0 0; }
+  label.field { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 0.3rem; }
+  .folder-note { margin: 0.4rem 0 1rem; }
+  .brief-group { margin: 0 0 2rem; }
+  .brief-item { margin: 0 0 1.6rem; max-width: 1100px; }
+  .brief-item img { max-height: 78vh; border-radius: 6px; }
+  .brief-item p { white-space: pre-wrap; margin: 0.55rem 0; }
+  .hint { color: var(--dim); font-size: 0.82rem; margin-top: 0.8rem; }
+  .empty { color: var(--muted); padding: 2rem 0; }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    .rail { order: -1; position: static; max-height: none; }
+    .stage img { max-height: 32vh; }
+    textarea { min-height: 4.5rem; }
+    main { padding: 0.8rem; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">Reference boards</a>
+  <nav>
+    <a href="/" id="nav-boards">Boards</a>
+    <a href="/brief" id="nav-brief">Brief</a>
+  </nav>
+</header>
+<main id="app"></main>
+<script id="boot" type="application/json">__BOOT__</script>
+<script>
+const app = document.querySelector("#app");
+const navBoards = document.querySelector("#nav-boards");
+const navBrief = document.querySelector("#nav-brief");
+
+function el(tag, attrs, children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs || {})) {
+    if (value == null || value === false) continue;
+    if (key === "class") node.className = value;
+    else if (key.startsWith("on") && typeof value === "function") node.addEventListener(key.slice(2).toLowerCase(), value);
+    else node.setAttribute(key, String(value));
+  }
+  for (const child of children || []) {
+    if (child == null || child === false) continue;
+    node.append(child.nodeType ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+function thumb(path, width) {
+  return "/thumb?p=" + encodeURIComponent(path) + "&w=" + width;
+}
+function fileUrl(path) {
+  return "/file?p=" + encodeURIComponent(path);
+}
+function folderUrl(path) {
+  return "/g?p=" + encodeURIComponent(path);
+}
+function pictureWord(count) {
+  return count === 1 ? "1 picture" : count.toLocaleString() + " pictures";
+}
+
+async function getJSON(url) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Could not read " + url);
+  return response.json();
+}
+
+async function postJSON(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error("Could not save");
+  return response.json();
+}
+
+function setNav(which) {
+  navBoards.classList.toggle("here", which === "boards");
+  navBrief.classList.toggle("here", which === "brief");
+}
+
+function readBoot() {
+  const node = document.getElementById("boot");
+  if (!node) return null;
+  const text = node.textContent.trim();
+  if (!text || text === "__BOOT__") return null;
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    return null;
+  }
+}
+
+function boot() {
+  const baked = readBoot();
+  const path = location.pathname;
+  if (path === "/brief") renderBrief(baked);
+  else if (path === "/g") renderGallery(baked);
+  else renderIndex(baked);
+}
+
+async function renderIndex(baked) {
+  setNav("boards");
+  document.title = "Reference boards";
+  let payload = baked && baked.page === "index" ? baked : null;
+  if (!payload) {
+    app.replaceChildren(el("p", { class: "lede" }, ["Reading the folders…"]));
+    try {
+      payload = await getJSON("/api/collections");
+    } catch (error) {
+      app.replaceChildren(el("p", { class: "empty" }, [error.message]));
+      return;
+    }
+  }
+  const included = Object.values(payload.notes.images || {}).filter((entry) => entry.include === true).length;
+  const search = el("input", { type: "search", placeholder: "Find a folder", id: "find" });
+  const shelves = el("div", { id: "shelves" });
+  app.replaceChildren(
+    el("h1", {}, ["Boards"]),
+    el("p", { class: "lede" }, [
+      "Each folder is a contact sheet. A picture is in the brief only after you press Include. Leave out sets one aside. Anything you never mark stays out.",
+    ]),
+    el("p", {}, [
+      el("a", { href: "/brief", class: included ? "marked" : "quiet" }, [
+        included ? included + " included for the editor" : "Nothing included yet",
+      ]),
+    ]),
+    search,
+    shelves,
+  );
+  const groups = [
+    ["tui", "TUI"],
+    ["mood", "Mood"],
+    ["inspo", "Inspo"],
+  ];
+  const nameCount = {};
+  for (const card of payload.collections) {
+    const key = card.name.toLowerCase();
+    nameCount[key] = (nameCount[key] || 0) + 1;
+  }
+  function cardTitle(card) {
+    if (nameCount[card.name.toLowerCase()] === 1) return card.name;
+    const parts = card.place.split("/").filter(Boolean);
+    for (let take = 1; take <= parts.length; take += 1) {
+      const title = parts.slice(-take).join(" / ") + " / " + card.name;
+      const clash = payload.collections.some((other) => other !== card && cardTitleRaw(other, take) === title);
+      if (!clash) return title;
+    }
+    return card.place + " / " + card.name;
+  }
+  function cardTitleRaw(card, take) {
+    const parts = card.place.split("/").filter(Boolean);
+    return parts.slice(-take).join(" / ") + " / " + card.name;
+  }
+  for (const [kind, title] of groups) {
+    const cards = payload.collections.filter((card) => card.kind === kind);
+    if (!cards.length) continue;
+    const grid = el("div", { class: "cards", "data-shelf": title });
+    for (const card of cards) {
+      const bits = [card.place, pictureWord(card.images)];
+      if (card.folders) bits.push(card.folders === 1 ? "1 folder" : card.folders + " folders");
+      if (card.included) bits.push(card.included + " included");
+      const cover = card.cover
+        ? el("img", { src: thumb(card.cover, 480), alt: "", loading: "lazy" })
+        : el("div", { class: "stage" });
+      grid.append(el("a", { class: "card", href: folderUrl(card.path), "data-text": (card.name + " " + card.place).toLowerCase() }, [
+        cover,
+        el("div", {}, [
+          el("strong", {}, [cardTitle(card)]),
+          el("span", {}, [bits.join(" · ")]),
+        ]),
+      ]));
+    }
+    shelves.append(el("h2", {}, [title]), grid);
+  }
+  search.addEventListener("input", () => {
+    const query = search.value.trim().toLowerCase();
+    for (const card of shelves.querySelectorAll("a.card")) {
+      card.hidden = query !== "" && !card.dataset.text.includes(query);
+    }
+    for (const heading of shelves.querySelectorAll("h2")) {
+      const grid = heading.nextElementSibling;
+      heading.hidden = grid && ![...grid.children].some((child) => !child.hidden);
+      if (grid) grid.hidden = heading.hidden;
+    }
+  });
+}
+
+function selectedFromHash(images) {
+  if (!location.hash.startsWith("#s=")) return images[0] || null;
+  const wanted = decodeURIComponent(location.hash.slice(3));
+  return images.find((image) => image.path === wanted) || images[0] || null;
+}
+
+async function renderGallery(baked) {
+  setNav("boards");
+  const folderPath = new URLSearchParams(location.search).get("p");
+  if (!folderPath) {
+    location.href = "/";
+    return;
+  }
+  let folder = null;
+  if (baked && baked.page === "gallery") {
+    if (!baked.folder) {
+      app.replaceChildren(el("p", { class: "empty" }, ["This folder is not one of the boards."]));
+      return;
+    }
+    folder = baked.folder;
+  }
+  if (!folder) {
+    app.replaceChildren(el("p", { class: "lede" }, ["Opening the folder…"]));
+    try {
+      folder = await getJSON("/api/folder?p=" + encodeURIComponent(folderPath));
+    } catch (error) {
+      app.replaceChildren(el("p", { class: "empty" }, ["This folder is not one of the boards."]));
+      return;
+    }
+  }
+  document.title = folder.name + " · boards";
+  const state = {
+    filter: "all",
+    selected: selectedFromHash(folder.images),
+    status: "",
+  };
+
+  const crumbs = el("div", { class: "crumbs" });
+  crumbs.append(el("a", { href: "/" }, ["Boards"]));
+  folder.crumbs.forEach((crumb, index) => {
+    crumbs.append(" / ");
+    if (index === folder.crumbs.length - 1) crumbs.append(crumb.name);
+    else crumbs.append(el("a", { href: folderUrl(crumb.path) }, [crumb.name]));
+  });
+
+  const tally = el("p", { class: "quiet", id: "tally" });
+  const folderNote = el("textarea", { id: "folder-note", placeholder: "A note for this whole folder" }, []);
+  folderNote.value = folder.folderNote || "";
+  const folderStatus = el("p", { class: "status", id: "folder-status" });
+
+  const chips = el("div", { class: "chips" });
+  for (const [id, label] of [["all", "All"], ["in", "Included"], ["out", "Left out"], ["open", "Unmarked"], ["noted", "With a note"]]) {
+    chips.append(el("button", { type: "button", "data-filter": id, class: id === "all" ? "on" : "", onclick: () => setFilter(id) }, [label]));
+  }
+
+  const sheet = el("div", { class: "sheet", id: "sheet", tabindex: "0" });
+  const stage = el("div", { class: "stage" });
+  const stageImg = el("img", { alt: "" });
+  stage.append(stageImg);
+  const nameHeading = el("h3", { id: "pic-name" });
+  const includeBtn = el("button", { type: "button", class: "choice", onclick: () => choose(true) }, [el("kbd", {}, ["i"]), "Include"]);
+  const outBtn = el("button", { type: "button", class: "choice", onclick: () => choose(false) }, [el("kbd", {}, ["o"]), "Leave out"]);
+  const note = el("textarea", { id: "pic-note", placeholder: "What should the editor take from this picture?" });
+  const noteStatus = el("p", { class: "status" });
+  const rail = el("aside", { class: "rail" }, [
+    stage,
+    nameHeading,
+    el("div", { class: "choices" }, [includeBtn, outBtn]),
+    el("label", { class: "field", for: "pic-note" }, ["Instruction for this picture"]),
+    note,
+    noteStatus,
+    el("p", { class: "hint" }, ["Arrows move. i includes. o leaves it out. u clears the mark. Esc leaves the note."]),
+  ]);
+
+  const pictures = el("section");
+  const childBox = el("div");
+  if (folder.children.length) {
+    const grid = el("div", { class: "folders" });
+    for (const child of folder.children) {
+      const cover = child.cover
+        ? el("img", { src: thumb(child.cover, 320), alt: "", loading: "lazy" })
+        : el("div");
+      const bits = [pictureWord(child.images)];
+      if (child.folders) bits.push(child.folders + " inside");
+      grid.append(el("a", { class: "folder", href: folderUrl(child.path) }, [
+        cover,
+        el("div", {}, [el("strong", {}, [child.name]), el("span", {}, [bits.join(" · ")])]),
+      ]));
+    }
+    childBox.append(el("h2", {}, ["Folders"]), grid);
+  }
+  if (folder.images.length) {
+    pictures.append(el("h2", {}, ["Pictures"]), chips, sheet);
+  } else if (!folder.children.length) {
+    pictures.append(el("p", { class: "empty" }, ["This folder has no pictures."]));
+  }
+
+  app.replaceChildren(
+    crumbs,
+    el("h1", {}, [folder.name]),
+    tally,
+    el("div", { class: "folder-note" }, [
+      el("label", { class: "field", for: "folder-note" }, ["Instruction for this folder"]),
+      folderNote,
+      folderStatus,
+    ]),
+    el("div", { class: "layout" }, [el("div", {}, [childBox, pictures]), rail]),
+  );
+
+  const tiles = new Map();
+  for (const image of folder.images) {
+    const img = el("img", { alt: image.name, loading: "lazy" });
+    img.src = thumb(image.path, 360);
+    const tile = el("button", { type: "button", class: "tile", onclick: () => select(image, true) }, [
+      img,
+      el("span", { class: "cap" }, [image.name]),
+    ]);
+    tile.dataset.path = image.path;
+    tiles.set(image.path, tile);
+    sheet.append(tile);
+  }
+
+  let folderTimer = 0;
+  folderNote.addEventListener("input", () => {
+    folderStatus.textContent = "Saving…";
+    clearTimeout(folderTimer);
+    folderTimer = setTimeout(async () => {
+      try {
+        await postJSON("/api/folder", { path: folder.path, note: folderNote.value });
+        folderStatus.textContent = "Saved";
+      } catch (error) {
+        folderStatus.textContent = error.message;
+      }
+    }, 350);
+  });
+
+  let noteTimer = 0;
+  let saveFlight = null;
+  let saveAgain = false;
+  note.addEventListener("input", () => {
+    if (!state.selected) return;
+    state.selected.note = note.value;
+    saveAgain = true;
+    paintTile(state.selected);
+    noteStatus.textContent = "Saving…";
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => saveImage(state.selected), 350);
+  });
+
+  function paintTile(image) {
+    const tile = tiles.get(image.path);
+    if (!tile) return;
+    tile.classList.toggle("included", image.include === true);
+    tile.classList.toggle("out", image.include === false);
+    tile.classList.toggle("selected", state.selected && state.selected.path === image.path);
+  }
+
+  function paintTally() {
+    const included = folder.images.filter((image) => image.include === true).length;
+    const left = folder.images.filter((image) => image.include === false).length;
+    const open = folder.images.length - included - left;
+    tally.textContent = [pictureWord(folder.images.length), included + " included", left + " left out", open + " unmarked"].join(" · ");
+  }
+
+  function visibleImages() {
+    return folder.images.filter((image) => {
+      if (state.filter === "in") return image.include === true;
+      if (state.filter === "out") return image.include === false;
+      if (state.filter === "open") return image.include !== true && image.include !== false;
+      if (state.filter === "noted") return Boolean(image.note);
+      return true;
+    });
+  }
+
+  function applyFilter() {
+    const visible = new Set(visibleImages().map((image) => image.path));
+    for (const [path, tile] of tiles) tile.hidden = !visible.has(path);
+    chips.querySelectorAll("button").forEach((button) => button.classList.toggle("on", button.dataset.filter === state.filter));
+    if (state.selected && !visible.has(state.selected.path)) select(visibleImages()[0] || null, false);
+  }
+
+  function setFilter(id) {
+    state.filter = id;
+    applyFilter();
+    sheet.focus();
+  }
+
+  function paintRail() {
+    const image = state.selected;
+    if (!image) {
+      stageImg.removeAttribute("src");
+      nameHeading.textContent = folder.images.length ? "No picture in this filter" : "No picture in this folder";
+      note.value = "";
+      includeBtn.className = "choice";
+      outBtn.className = "choice";
+      return;
+    }
+    if (stageImg.dataset.path !== image.path) {
+      stageImg.src = fileUrl(image.path);
+      stageImg.alt = image.name;
+      stageImg.dataset.path = image.path;
+    }
+    nameHeading.textContent = image.name;
+    includeBtn.className = "choice" + (image.include === true ? " on-in" : "");
+    outBtn.className = "choice" + (image.include === false ? " on-out" : "");
+    if (document.activeElement !== note) note.value = image.note || "";
+  }
+
+  function select(image, focusSheet) {
+    state.selected = image;
+    for (const item of folder.images) paintTile(item);
+    paintRail();
+    if (image) {
+      const url = folderUrl(folder.path) + "#s=" + encodeURIComponent(image.path);
+      history.replaceState(null, "", url);
+      const tile = tiles.get(image.path);
+      if (tile) tile.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+    if (focusSheet) sheet.focus();
+  }
+
+  async function saveImage(image) {
+    saveAgain = true;
+    if (saveFlight) return saveFlight;
+    saveFlight = (async () => {
+      try {
+        while (saveAgain) {
+          saveAgain = false;
+          const include = image.include === true ? true : image.include === false ? false : null;
+          const noteText = image.note || "";
+          const saved = await postJSON("/api/image", { path: image.path, include, note: noteText });
+          if (saveAgain || (image.note || "") !== noteText) continue;
+          if (saved.entry) {
+            image.include = saved.entry.include;
+            image.note = saved.entry.note;
+          } else if (!image.note) {
+            image.include = null;
+          }
+          paintTile(image);
+          paintTally();
+          if (state.selected && state.selected.path === image.path) {
+            noteStatus.textContent = "Saved";
+            paintRail();
+          }
+        }
+      } catch (error) {
+        noteStatus.textContent = error.message;
+      } finally {
+        saveFlight = null;
+      }
+    })();
+    return saveFlight;
+  }
+
+  function choose(include) {
+    const image = state.selected;
+    if (!image) return;
+    image.include = image.include === include ? null : include;
+    paintTile(image);
+    paintRail();
+    paintTally();
+    noteStatus.textContent = "Saving…";
+    saveImage(image);
+  }
+
+  function move(deltaRow, deltaCol) {
+    const items = visibleImages();
+    if (!items.length) return;
+    const columns = Math.max(1, getComputedStyle(sheet).gridTemplateColumns.split(" ").length);
+    let index = state.selected ? items.findIndex((image) => image.path === state.selected.path) : 0;
+    if (index < 0) index = 0;
+    if (deltaCol) index = Math.max(0, Math.min(items.length - 1, index + deltaCol));
+    if (deltaRow) {
+      const next = index + deltaRow * columns;
+      if (next >= 0 && next < items.length) index = next;
+    }
+    select(items[index], false);
+  }
+
+  document.addEventListener("keydown", onKey);
+  function onKey(event) {
+    if (location.pathname !== "/g") {
+      document.removeEventListener("keydown", onKey);
+      return;
+    }
+    const typing = document.activeElement && document.activeElement.matches("textarea, input");
+    if (typing) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        sheet.focus();
+      }
+      return;
+    }
+    if (event.key === "ArrowRight") { event.preventDefault(); move(0, 1); }
+    else if (event.key === "ArrowLeft") { event.preventDefault(); move(0, -1); }
+    else if (event.key === "ArrowDown") { event.preventDefault(); move(1, 0); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); move(-1, 0); }
+    else if (event.key === "i") choose(true);
+    else if (event.key === "o") choose(false);
+    else if (event.key === "u") {
+      if (state.selected && state.selected.include != null) choose(state.selected.include);
+    }
+    else if (event.key === "Enter") {
+      event.preventDefault();
+      note.focus();
+    }
+  }
+
+  paintTally();
+  applyFilter();
+  select(state.selected, false);
+  if (folder.images.length) sheet.focus();
+}
+
+async function renderBrief(baked) {
+  setNav("brief");
+  document.title = "Brief · boards";
+  let notes = baked && baked.page === "brief" ? baked.notes : null;
+  if (!notes) {
+    app.replaceChildren(el("p", { class: "lede" }, ["Gathering the included pictures…"]));
+    try {
+      notes = await getJSON("/api/notes");
+    } catch (error) {
+      app.replaceChildren(el("p", { class: "empty" }, [error.message]));
+      return;
+    }
+  }
+  const included = Object.entries(notes.images || {}).filter(([, entry]) => entry.include === true);
+  const folderNotes = Object.entries(notes.folders || {}).filter(([, text]) => text);
+  app.replaceChildren(
+    el("h1", {}, ["Brief"]),
+    el("p", { class: "lede" }, [
+      "Only pictures marked Include. Left out and unmarked pictures stay out of this brief. The file is ui_board/notes.json.",
+    ]),
+  );
+  if (!included.length && !folderNotes.length) {
+    app.append(el("p", { class: "empty" }, ["No pictures included yet. Open a board, mark Include, and write what the editor should take from it."]));
+    return;
+  }
+  const byFolder = new Map();
+  for (const [path, entry] of included) {
+    const folder = path.slice(0, path.lastIndexOf("/"));
+    if (!byFolder.has(folder)) byFolder.set(folder, []);
+    byFolder.get(folder).push({ path, name: path.slice(path.lastIndexOf("/") + 1), note: entry.note || "" });
+  }
+  for (const [folder] of folderNotes) {
+    if (!byFolder.has(folder)) byFolder.set(folder, []);
+  }
+  const ordered = [...byFolder.keys()].sort((a, b) => a.localeCompare(b));
+  for (const folder of ordered) {
+    const group = el("section", { class: "brief-group" });
+    group.append(
+      el("h2", {}, [folder]),
+      el("p", {}, [el("a", { href: folderUrl(folder) }, ["Open this folder"])]),
+    );
+    const folderText = (notes.folders || {})[folder];
+    if (folderText) group.append(el("p", {}, [folderText]));
+    for (const image of byFolder.get(folder)) {
+      const item = el("article", { class: "brief-item" });
+      const img = el("img", { src: fileUrl(image.path), alt: image.name });
+      item.append(
+        img,
+        el("p", { class: "quiet" }, [image.name]),
+        el("p", {}, [image.note || "Included, with no note yet."]),
+        el("p", {}, [el("a", { href: folderUrl(folder) + "#s=" + encodeURIComponent(image.path) }, ["Edit this note"])]),
+      );
+      group.append(item);
+    }
+    app.append(group);
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

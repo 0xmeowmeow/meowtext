@@ -4,18 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "meowtext"
-version = "0.2.0"
-description = "TUI for ASCII and ANSI banners from FIGlet, TOIlet, and TheDraw fonts"
+version = "1.0.0"
+description = "Compare fonts, make ANSI art, and bring it into Kitty"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "textual>=8",
+    "textual>=8,<9",
     "rich>=13",
-    "pillow>=10",
+    "pillow>=10,<14",
+    "textual-image>=0.14,<0.15",
 ]
 
 [project.scripts]
 meowtext = "meowtext.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/0xmeowmeow/meowtext"
+Issues = "https://github.com/0xmeowmeow/meowtext/issues"
 
 [tool.setuptools.packages.find]
 include = ["meowtext*"]

@@ -132,6 +132,54 @@ def _apply_sgr(
     return fg, bg, bold
 
 
+def fit_width(grid: Grid, max_width: int = 500) -> Grid:
+    """Drop a field of leading space that would be wider than the terminal can draw.
+
+    Some FIGlet fonts are right aligned. Asked for a wide page, they put the
+    letters near column 10000. Building that grid is what crashes the editor
+    when the font list reaches them.
+    """
+
+    if not grid.rows or grid.width <= max_width:
+        return grid
+    first: int | None = None
+    last = -1
+    for row in grid.rows:
+        for x, cell in enumerate(row):
+            if is_empty(cell):
+                continue
+            if first is None or x < first:
+                first = x
+            if x > last:
+                last = x
+    if first is None:
+        return grid
+    left = max(0, first - 1)
+    right = min(grid.width, max(last + 2, left + 1))
+    if right - left > max_width:
+        right = left + max_width
+    if left == 0 and right == grid.width:
+        return grid
+    width = right - left
+    rows: list[list[Cell]] = []
+    for row in grid.rows:
+        piece = [cell.clone() for cell in row[left:right]]
+        if len(piece) < width:
+            piece.extend(Cell() for _ in range(width - len(piece)))
+        rows.append(piece)
+    result = Grid(rows)
+    spans: list[tuple[str, int, int, int, int]] = []
+    for char, x, y, w, h in grid.spans:
+        shifted = x - left
+        if shifted >= width or shifted + w <= 0:
+            continue
+        start = max(shifted, 0)
+        spans.append((char, start, y, min(w, width - start), h))
+    result.spans = tuple(spans)
+    result.palette = grid.palette
+    return result
+
+
 def tighten(grid: Grid) -> Grid:
     """Drop blank rows at the edges and blank columns on the right.
 

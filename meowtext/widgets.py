@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from rich.text import Text
+from textual import events
 from textual.binding import Binding
 from textual.message import Message
 from textual.widget import Widget
@@ -58,6 +59,14 @@ class Cycle(Widget):
         elif self.value not in {item for _, item in self.options}:
             self.value = self.options[0][1] if self.options else ""
         self.refresh()
+
+    def on_click(self, event: events.Click) -> None:
+        if self.disabled:
+            return
+        self.focus()
+        width = max(self.size.width, 1)
+        self._step(-1 if event.x < width / 2 else 1)
+        event.stop()
 
     def action_next(self) -> None:
         self._step(1)

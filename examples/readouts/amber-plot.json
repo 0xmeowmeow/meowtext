@@ -1,0 +1,13 @@
+{
+  "name": "amber-plot",
+  "ink": "amber",
+  "border": "ticks",
+  "glow": "strong",
+  "perspective": true,
+  "caption": "CYCLE  1871",
+  "aside": "TIME  0.10+50",
+  "x_axis": "R-AXIS",
+  "y_axis": "Z-AXIS",
+  "x_ticks": ["5", "10", "15", "20"],
+  "readouts": ["amber-curves.json", "amber-columns.json"]
+}

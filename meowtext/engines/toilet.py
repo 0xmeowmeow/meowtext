@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from meowtext.ansi import parse_ansi
+from meowtext.ansi import fit_width, parse_ansi
 from meowtext.engines.external import font_directory, run_tool, tool_available
 from meowtext.errors import RenderError
 from meowtext.grid import Grid
@@ -49,7 +49,7 @@ def render(text: str, font: str) -> Grid:
         ["toilet", "-d", str(path.parent), "-f", path.stem, "-w", "10000"],
         text,
     )
-    return parse_ansi(raw)
+    return fit_width(parse_ansi(raw))
 
 
 def _directories() -> list[Path]:

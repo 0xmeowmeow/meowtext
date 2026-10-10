@@ -1,0 +1,8 @@
+{
+  "name": "signal",
+  "style": "cells",
+  "source": "file:signal.txt",
+  "format": "lines",
+  "range": [0, 100],
+  "count": 8
+}

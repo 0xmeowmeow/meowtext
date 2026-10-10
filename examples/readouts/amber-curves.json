@@ -1,0 +1,10 @@
+{
+  "name": "amber-curves",
+  "style": "points",
+  "layout": "curves",
+  "ink": "amber",
+  "source": "file:curves.txt",
+  "format": "rows",
+  "range": [0, 1],
+  "count": 48
+}

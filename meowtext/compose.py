@@ -94,13 +94,17 @@ def present(
     motion = animation or Animation(name=anim)
     palette = palette or RelationPalette(hue=style.hue)
     palette.ensure(source)
-    phase, hue_offset, outline_phase, pulse = _motion(motion, frame, style.outline_speed)
+    phase, hue_offset, outline_phase, letter_hue, outline_hue, pulse = _motion(
+        motion, frame, style.outline_speed
+    )
     styled = apply_style(
         paint(source, palette, hue_offset),
         style,
         phase=phase,
         pulse=pulse,
         outline_phase=outline_phase,
+        letter_hue=letter_hue,
+        outline_hue=outline_hue,
     )
     if motion.name == "sparkle":
         styled = sparkle(styled, int(motion_clock(frame, motion)))
@@ -113,29 +117,35 @@ def present(
     return styled
 
 
-def _motion(motion: Animation, frame: int, outline_speed: float) -> tuple[float, float, float, float]:
-    """Letter phase, role hue, outline phase, and outline pulse for this frame."""
+def _motion(
+    motion: Animation, frame: int, outline_speed: float
+) -> tuple[float, float, float, float, float, float]:
+    """Letter phase, role hue, outline phase, letter hue, outline hue, and pulse.
+
+    Hue rotates colours where they sit. March slides the gradient along its
+    direction. They are different motions: a figlet banner has no colour
+    roles, so a hue cycle that also slid looked identical to march.
+    """
 
     if motion.name not in {"hue", "march", "pulse"}:
-        return 0.0, 0.0, 0.0, 1.0
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 1.0
     clock = motion_clock(frame, motion)
     if motion.name == "pulse":
         pulse = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(clock / 2.5))
-        return 0.0, 0.0, 0.0, pulse
-    phase, hue_offset = animation_phase(clock, motion.travel)
-    if motion.name == "march":
-        hue_offset = 0.0
-    outline_phase = animation_phase(clock * (outline_speed if outline_speed > 0 else 1.0), motion.travel)[0]
+        return 0.0, 0.0, 0.0, 0.0, 0.0, pulse
+    speed = outline_speed if outline_speed > 0 else 1.0
+    letter_phase, letter_spin = animation_phase(clock, motion.travel)
+    outline_phase, outline_spin = animation_phase(clock * speed, motion.travel)
     layers = motion.layers
-    if layers == "letters":
-        return phase, 0.0, 0.0, 1.0
-    if layers == "outline":
-        return 0.0, 0.0, outline_phase, 1.0
-    if layers == "roles":
-        if motion.name == "march":
-            hue_offset = animation_phase(clock, motion.travel)[1]
-        return 0.0, hue_offset, 0.0, 1.0
-    return phase, hue_offset, outline_phase, 1.0
+    if motion.name == "hue":
+        role = letter_spin if layers in {"roles", "all"} else 0.0
+        letters = letter_spin if layers in {"letters", "all"} else 0.0
+        outline = outline_spin if layers in {"outline", "all"} else 0.0
+        return 0.0, role, 0.0, letters, outline, 1.0
+    role = 0.0
+    letters = letter_phase if layers in {"letters", "all"} else 0.0
+    outline = outline_phase if layers in {"outline", "all"} else 0.0
+    return letters, role, outline, 0.0, 0.0, 1.0
 
 
 def _apply_patches(grid: Grid, patches: tuple[tuple[int, int, Cell], ...]) -> Grid:

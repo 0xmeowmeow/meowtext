@@ -1,84 +1,122 @@
 # meowtext
 
-A terminal editor for ASCII and ANSI banners. Type a line, pick a font, then add a colour gradient, an outline, or a drop shadow. The picture can be exported for a terminal, a browser, Kitty, IRC, or another program. The editable banner is a `.meowtext` project.
+Compare fonts visually, decorate your words, and bring the result into Kitty.
 
-Three font sources:
+Meowtext is a terminal banner editor for Kitty on Linux. It uses FIGlet, TOIlet and TheDraw fonts, with the original Meowtext rendering and effects engines behind a new comparison-first interface.
 
-- **FIGlet** (`.flf`), via the `figlet` program. The system set in `/usr/share/figlet`, plus extra fonts in `~/.config/meowtext/fonts`.
-- **TOIlet** (`.tlf`), via the `toilet` program, from the same two directories.
-- **TheDraw** (`.tdf`), read directly. Colour, block, and outline fonts, including files that hold more than one font. Fonts already in `~/.config/tdfgo/fonts` are picked up. The list is split into block, outline, and colour, and colour copies such as Nuclear Blue and Nuclear Cyan share one row.
+![Meowtext decoration panel](docs/images/editor.png)
 
-`meowtext fonts --fetch` downloads the extra FIGlet collection (contributed, JavE, international, C64, Obanner, and the rest of the figlet.org set) into `~/.config/meowtext/fonts`. Names the system already has are left as they are. On this machine the TOIlet fonts in that collection were already installed.
+## Install
 
-## Run
+You need Kitty, Python 3.12 or newer, FIGlet, and DejaVu Sans Mono. TOIlet adds more fonts.
 
-```bash
-python -m meowtext
-python -m meowtext path/to/banner.meowtext
+On Debian or Ubuntu:
+
+```sh
+sudo apt install kitty python3-venv figlet toilet fonts-dejavu-core
 ```
 
-```bash
-python -m meowtext render "meow" -f "ANSI Shadow" --preset pop
-python -m meowtext render "meow" -e toilet -f future --gradient ice
-python -m meowtext render "MEOW" -e tdf -f NIRVANA --format png -o meow.png
-python -m meowtext fonts -e tdf -q ice
+Then install from this repository:
+
+```sh
+git clone https://github.com/0xmeowmeow/meowtext.git
+cd meowtext
+./install.sh
 ```
 
-With no flags, `render` prints ANSI on stdout. `--format` is `ansi`, `plain`, `html`, `json`, `png`, `kitty`, or `irc`. A piped program can pass the text on stdin.
+Open Kitty and run `meowtext`. If your shell has not picked up the new command yet, run `~/.local/bin/meowtext`.
 
-The banner stays large. Look, Outline, Shadow, Colour, Animate, and Notes take turns in the panel on the right. Left and right cycle the control that is focused. Up and down move between controls. Ctrl+Left and Ctrl+Right change section from anywhere.
+The installer creates an isolated Python environment and a launcher. It does not resize Kitty or change your terminal theme.
 
-| Key | Does |
-| --- | --- |
-| Ctrl+S | Save a `.meowtext` project. The name comes from the words and the font. A file that is already there is left alone, and the new one gets the next number. Saving again updates the file this session created. |
-| Ctrl+B | Save the whole setup to favourites (`~/.config/meowtext/favourites`). Recall one from the Look section. |
-| Ctrl+E | Paint. Arrows move. Type a character to put it down. `[` and `]` change the paint colour. `,` and `.` change letter. Tab switches between the banner and one letter. |
-| Ctrl+Y | Copy the export format. |
-| Ctrl+O | Open the `.meowtext` path in the export box. |
-| Ctrl+F / Ctrl+T | Font filter, then back to the words. |
+## Make something
 
-Export and Copy write the picture in the format next to the path box. They use the frame on screen.
+1. **Fonts:** type your words and compare six rendered choices. **More like this** narrows the selection; **Back** undoes that step. Categories, search, **Browse all**, and starred favourites are available too.
+2. **Use font → Decorate:** the full banner stays above the controls. Fill, Outline, Colour roles, Shadow and Motion each have their own panel. Controls appear when their effect is enabled.
+3. **Presets:** compare 28 ready-made looks using your selected words and font, then adjust any detail.
+4. **Save & use:** the name comes from your words. Changing the name updates the export filename. A custom name or path stays yours. Save, choose where the banner should appear, and press **Copy command**.
 
-## Effects
+`Ctrl+T` edits the words, `Ctrl+F` returns to fonts, `Ctrl+P` inspects at actual cell size, `Ctrl+S` opens Save & use, and `Ctrl+Q` quits. F1–F4 switch sections. Mouse and Tab navigation both work. Small windows scroll; no window dimensions are forced.
 
-Gradients repaint letters that are not part of a colour role. A gradient can be smooth or hard bands. In Colour, each stop's hue, saturation, and value can be changed, and stops can be added or removed. Save palette writes it to `~/.config/meowtext/palettes.json`, and it is there the next time the editor opens. Save look does the same for a preset.
+Font discovery measures shape, weight, size and colour locally. Its first screen appears immediately while the full catalogue is indexed, then cached. The number of fonts depends on what you have installed; thousands are supported. Narrowing is reversible and does not promise an exact four-click result for every font.
 
-The outline has its own palette, its own direction, and its own cycle speed. It can sit on any mix of the top, bottom, left, and right, a chosen number of cells out, outside the letters, inside the holes, or both. Whole word rims the banner as one shape. Each letter rims every letter, so neighbours do not share an edge. The outline can also be shifted, the way the shadow is. Symbols are the block, box-drawing, and braille sets, and any character you add. Added symbols are kept in `~/.config/meowtext/symbols.json`.
+## Use your designs
 
-Drop shadow copies the letters, shifted. Built-in looks: plain, rainbow, fire, ice, stamp, pop.
+After saving a design named `neon`:
 
-Animate plays in the preview: hue cycle, marching gradient, outline pulse, sparkle, a scanning band, or a trace. A trace can run around the outline, across the rows, one letter fully then the next, or out from the centre. It can draw the letters on and leave them, or be a bright point that keeps moving. Speed, direction (forward, backward, ping-pong), how far the colour travels, and which layer moves (letters, outline, colour roles, or everything) are all editable. The project remembers the settings. Export keeps the frame on screen, not a movie.
-
-A colour TheDraw font keeps the DOS palette index on each cell. Cells that share an index are one role, so the red parts stay related to the blue parts. Hue moves every linked role by the same amount: red and blue travel together and the gap between them stays. Greys have no hue and do not move. Turn Link off to edit one role's hue, saturation, and value on its own. Split sections makes each separate patch of that role its own copy, which you can then edit alone. Focus dims every other colour so the role you are editing is the one still bright. The saved picture is never dimmed. `--hue 40` does the shared rotation from the command line.
-
-TheDraw outline fonts are a separate thing: the file stores letters, and meowtext maps them with TheDraw's standard box-drawing table (`A` is `═`, `E` is `╒`, and so on). `@` and `O` are spaces. A row marked with `&` hangs below the baseline.
-
-Notes are a page in the editor. They are stored in the project and in a favourite.
-
-Painting the banner replaces cells on the picture you see. Painting a letter changes that character for this banner and places the letters separately, so the font file is not rewritten.
-
-## Using the banner somewhere else
-
-The editor is one frontend. The banner itself is a grid of cells, one terminal column each.
-
-| Format | For |
-| --- | --- |
-| `.meowtext` | the project. Words, font, both gradients, outline, shadow, colour roles, animation, notes, painted cells, and edited letters. `"meowtext": "project"`. |
-| ANSI | terminals, shell scripts, other TUIs |
-| plain | anywhere colour would be stripped |
-| HTML | a browser |
-| JSON | another program. `"meowtext": 1`, cells of `{c, fg, bg}`, plus `fg_slot` / `roles` / `hue` when the banner has colour roles |
-| PNG | an image |
-| Kitty | a [Kitty graphics](https://sw.kovidgoyal.net/kitty/graphics-protocol/) sequence. `cat file.kitty` inside Kitty shows it |
-| IRC | mIRC colour codes |
-
-JSON is the interchange for a second interface, for example a Charmbracelet / Bubble Tea client, without linking that UI to this one. The Python call is `meowtext.render_banner`.
-
-```python
-from meowtext import render_banner
-from meowtext.effects import BannerStyle
-
-banner = render_banner("meow", "figlet", "ANSI Shadow", BannerStyle(gradient="sunset", shadow=True))
+```sh
+meowtext show neon                         # summon the saved artwork
+meowtext show neon "NEW WORDS"             # reuse its font and style
+meowtext watch neon                        # play its animation; Ctrl+C exits
+meowtext run neon -- ls                    # banner before a command
+meowtext run neon --after -- git status    # banner after a command
+meowtext frame neon -- htop                # a Kitty window with art above the tool
 ```
 
-Letter case in a TheDraw font is often uppercase only. Missing lowercase is drawn from the uppercase glyph, and the status line says when that happened.
+`frame` keeps an animated banner running when the design has motion. It opens a separate Kitty window with two panes and the tool focused. `run` preserves the command's input, output and exit status; the artwork goes to stderr so it does not get mixed into piped data. Commands run directly: shell aliases use the integration below.
+
+To decorate commands and aliases automatically in a Kitty **zsh** session:
+
+```sh
+eval "$(meowtext shell zsh --style neon)"
+```
+
+For **fish**:
+
+```fish
+meowtext shell fish --style neon | source
+```
+
+Type `meowtext-off` to stop. These commands apply to the current shell session. Nothing is added to your shell startup files. For a particular command or alias, use `meowtext bind git neon`, then reload the integration. Bindings override the default banner; `meowtext bind git --remove` removes one.
+
+For Markdown, including documents viewed with Glow:
+
+```sh
+meowtext show neon --format markdown -o neon.md
+glow neon.md
+```
+
+Markdown keeps the letter shapes in a code block. ANSI colours belong in terminal output; animated playback uses `watch` or `frame`. Meowtext can decorate the area around another TUI; it does not rewrite that application's internal theme or controls.
+
+## Effects that carry forward
+
+- Solid colours, named palettes, custom gradient stops, hard bands and six gradient directions.
+- Shade, thick, contour, heavy, double and block outlines. Set width, sides, inside/outside placement, whole-word or per-letter scope, offsets, and a separate outline gradient and speed.
+- Drop shadows with their own offsets, colour and character.
+- Hue cycle, marching gradients, outline pulse, sparkle, scan and trace. Set speed, direction, colour travel and animated layers. Trace supports outline, rows, letters and centre paths, with draw-on or runner behaviour.
+- TheDraw colour variants and linked or independent colour roles. Split separate sections into independent roles, focus a role in the preview, and edit named colours or HSV values.
+- Cell painting, individual letter edits, undo, and project notes. These change the design, not the font file.
+- Existing custom palettes, presets and symbols under the Meowtext configuration directory, and favourites saved by the original editor.
+
+The original editor is also retained as `meowtext legacy`. See [the original editor guide](docs/legacy-editor.md). Existing `.meowtext` projects still open:
+
+```sh
+meowtext path/to/design.meowtext
+meowtext save neon path/to/design.meowtext
+```
+
+A saved library design contains both the editable recipe and a frozen copy of its artwork. The frozen artwork still displays if the original font is later removed. Reusing the style with new words or playing its animation needs that font.
+
+## Fonts and exports
+
+System FIGlet/TOIlet fonts and `~/.config/meowtext/fonts` are discovered automatically. TheDraw `.tdf` files are read directly; the existing `~/.config/tdfgo/fonts` directory is also recognised. `meowtext fonts --fetch` downloads the optional extra FIGlet collection. Font files are not bundled with this repository; their original terms apply.
+
+Exports: ANSI, plain text, HTML, JSON cell data, PNG, Kitty graphics, IRC, Markdown and editable `.meowtext` projects. Still-image exports capture the current animation frame. PNG and Kitty previews use DejaVu Sans Mono.
+
+```sh
+meowtext render "MEOW" -f standard --preset sunset-rim
+meowtext render "MEOW" -e toilet -f future --gradient ice -o meow.png
+meowtext fonts -e tdf -q ice
+meowtext styles
+```
+
+Designs live in `~/.config/meowtext/library`. `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and a direct `MEOWTEXT_HOME` override are supported. Saving over a named design requires explicit replacement; editor exports ask for another path if the file already exists.
+
+## Development
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/python -m unittest discover -s tests
+```
+
+The release tests cover font discovery, editor navigation, detailed effects and project round trips, naming, painting, animation playback parity, saved artwork, shell integration and command streams. Experimental instrument renderers remain in the source; their old reference galleries are local research tools, not part of the main editor workflow.

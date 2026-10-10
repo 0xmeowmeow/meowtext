@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from meowtext.grid import Cell, Color, Grid, is_empty, is_ink
+from meowtext.palette import rotate_hue
 
 
 PALETTES: dict[str, tuple[Color, ...]] = {
@@ -161,6 +162,20 @@ ANIM_DIRECTIONS: tuple[tuple[str, str], ...] = (
     ("Ping-pong", "pingpong"),
 )
 
+# Spatial directions. The "-back" forms run the same axis the other way,
+# so an outline can be light where the letters are dark.
+GRADIENT_DIRECTIONS: tuple[tuple[str, str], ...] = (
+    ("Left to right", "horizontal"),
+    ("Right to left", "horizontal-back"),
+    ("Top to bottom", "vertical"),
+    ("Bottom to top", "vertical-back"),
+    ("Diagonal down", "diagonal"),
+    ("Diagonal up", "diagonal-back"),
+)
+OUTLINE_DIRECTIONS: tuple[tuple[str, str], ...] = GRADIENT_DIRECTIONS + (
+    ("Opposite the letters", "opposite"),
+)
+
 ANIM_LAYERS: tuple[tuple[str, str], ...] = (
     ("Everything", "all"),
     ("Letters", "letters"),
@@ -262,6 +277,7 @@ class BannerStyle:
     shadow_color: Color = DEFAULT_SHADOW
     shadow_char: str | None = None
     hue: float = 0.0
+    recolour_roles: bool = False
 
     def clone(self) -> BannerStyle:
         return replace(self)
@@ -298,6 +314,32 @@ PRESETS: dict[str, BannerStyle] = {
     ),
 }
 
+# Complete starting points. Existing names and project recipes remain valid.
+PRESETS.update({
+    "cyan": BannerStyle(stops=(Color(101, 232, 237),) * 2),
+    "amber": BannerStyle(stops=(Color(255, 189, 105),) * 2),
+    "paper": BannerStyle(stops=(Color(240, 239, 230),) * 2),
+    "orchid": BannerStyle(stops=(Color(211, 157, 255),) * 2),
+    "acid": BannerStyle(stops=(Color(179, 239, 115),) * 2),
+    "rose": BannerStyle(stops=(Color(255, 140, 163),) * 2),
+    "deep-sea": BannerStyle(gradient="ice", direction="vertical"),
+    "chrome": BannerStyle(gradient="metal", direction="vertical", shadow=True),
+    "ember": BannerStyle(gradient="fire", direction="vertical-back"),
+    "sunrise": BannerStyle(gradient="sunset", direction="vertical", shadow=True),
+    "toxic": BannerStyle(gradient="toxic", shadow=True, shadow_color=Color(20, 60, 5)),
+    "rainbow-bands": BannerStyle(gradient="rainbow", bands=True),
+    "ice-rim": BannerStyle(gradient="ice", outline=True, outline_mode="contour", outline_color=Color(120, 230, 255)),
+    "gold-rim": BannerStyle(stops=(Color(255, 216, 120),)*2, outline=True, outline_mode="double", outline_color=Color(150, 95, 25)),
+    "violet-shadow": BannerStyle(stops=(Color(205, 162, 255),)*2, shadow=True, shadow_color=Color(100, 42, 150), shadow_dx=2),
+    "cyan-shadow": BannerStyle(stops=(Color(130, 248, 250),)*2, shadow=True, shadow_color=Color(20, 100, 120), shadow_dx=2),
+    "blacklight": BannerStyle(stops=(Color(65, 10, 120),Color(226, 124, 255)), outline=True, outline_color=Color(195, 255, 110)),
+    "arcade": BannerStyle(gradient="rainbow", bands=True, shadow=True, shadow_color=Color(70, 30, 105), shadow_dx=2),
+    "blueprint": BannerStyle(stops=(Color(90, 160, 230),Color(210, 244, 255)), outline=True, outline_mode="contour", outline_color=Color(30, 85, 130)),
+    "silver-stamp": BannerStyle(gradient="metal", bands=True, outline=True, shadow=True),
+    "sunset-rim": BannerStyle(gradient="sunset", outline=True, outline_gradient="ice", outline_direction="opposite"),
+    "terminal-green": BannerStyle(stops=(Color(75, 230, 120),)*2),
+})
+
 
 def resolve_palette(name: str) -> tuple[Color, ...]:
     """A named palette, or comma-separated hex stops such as ``#f00,#00f``."""
@@ -311,29 +353,59 @@ def resolve_palette(name: str) -> tuple[Color, ...]:
     raise ValueError(f"unknown palette {name!r}")
 
 
+def opposite_direction(direction: str) -> str:
+    """The same axis, running the other way."""
+
+    paired = {
+        "horizontal": "horizontal-back",
+        "horizontal-back": "horizontal",
+        "vertical": "vertical-back",
+        "vertical-back": "vertical",
+        "diagonal": "diagonal-back",
+        "diagonal-back": "diagonal",
+    }
+    return paired.get(direction, "vertical-back")
+
+
+def _turn(stops: tuple[Color, ...] | None, hue: float) -> tuple[Color, ...] | None:
+    if not stops or not hue:
+        return stops
+    return tuple(rotate_hue(colour, hue) for colour in stops)
+
+
 def apply_style(
     grid: Grid,
     style: BannerStyle,
     phase: float = 0.0,
     pulse: float = 1.0,
     outline_phase: float | None = None,
+    letter_hue: float = 0.0,
+    outline_hue: float = 0.0,
 ) -> Grid:
     result = grid
-    if style.gradient:
-        stops = style.stops if style.stops else resolve_palette(style.gradient)
-        result = gradient(result, stops, style.direction, phase, bands=style.bands)
+    if style.recolour_roles or (style.stops and len(set(style.stops)) == 1):
+        result = result.copy()
+        for row in result.rows:
+            for cell in row:
+                cell.fg_slot = None
+    if style.gradient or style.stops:
+        stops = _turn(style.stops if style.stops else resolve_palette(style.gradient), letter_hue)
+        result = gradient(result, stops or (), style.direction, phase, bands=style.bands)
     if style.outline:
         if style.outline_gradient:
             stops = style.outline_stops if style.outline_stops else resolve_palette(style.outline_gradient)
         else:
             stops = None
+        direction = style.outline_direction
+        if direction == "opposite":
+            direction = opposite_direction(style.direction)
         result = outline(
             result,
             style.outline_char[:1] or "░",
-            style.outline_color,
+            rotate_hue(style.outline_color, outline_hue) if outline_hue else style.outline_color,
             mode=style.outline_mode,
-            stops=stops,
-            direction=style.outline_direction,
+            stops=_turn(stops, outline_hue),
+            direction=direction,
             phase=phase if outline_phase is None else outline_phase,
             pulse=pulse,
             bands=style.outline_bands,
@@ -825,12 +897,16 @@ def drop_shadow(
 def _position(x: int, y: int, width: int, height: int, direction: str, phase: float = 0.0) -> float:
     horizontal = 0.0 if width <= 1 else x / (width - 1)
     vertical = 0.0 if height <= 1 else y / (height - 1)
-    if direction == "vertical":
+    reverse = direction.endswith("-back")
+    name = direction[: -len("-back")] if reverse else direction
+    if name == "vertical":
         base = vertical
-    elif direction == "diagonal":
+    elif name == "diagonal":
         base = (horizontal + vertical) / 2
     else:
         base = horizontal
+    if reverse:
+        base = 1.0 - base
     if phase == 0:
         return base
     return (base + phase) % 1.0
