@@ -270,12 +270,12 @@ class RestoredWorkflowTests(unittest.TestCase):
                     app.query_one("#save-name", Input).value, "Hello-Kitty"
                 )
                 self.assertEqual(
-                    app.query_one("#export-path", Input).value, "Hello-Kitty.ans"
+                    app.query_one("#export-path", Input).value, "Hello-Kitty.html"
                 )
                 app.query_one("#save-name", Input).value = "my-design"
                 await pilot.pause()
                 self.assertEqual(
-                    app.query_one("#export-path", Input).value, "my-design.ans"
+                    app.query_one("#export-path", Input).value, "my-design.html"
                 )
                 app.query_one("#format", Select).value = "png"
                 await pilot.pause()

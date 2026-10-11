@@ -1,6 +1,7 @@
 """Rasterise terminal cells without glyph overhang or stretched block elements."""
 
 from functools import lru_cache
+import unicodedata
 from PIL import Image, ImageDraw, ImageFont
 
 from meowtext.errors import RenderError
@@ -17,6 +18,11 @@ def _font(size):
         raise RenderError(f"could not load {MONO_FONT}") from exc
 
 
+def cell_size(size=18):
+    font = _font(size)
+    return max(1, round(font.getlength("M"))), sum(font.getmetrics())
+
+
 @lru_cache(maxsize=2048)
 def _mask(char: str, size: int):
     font = _font(size)
@@ -29,7 +35,42 @@ def _mask(char: str, size: int):
     # full block overhangs its neighbours. Drawing the font directly doubled
     # strokes and erased edges when the next cell's background was painted.
     code = ord(char) if len(char) == 1 else 0
-    if char == "▀":
+    if 0x2500 <= code <= 0x257F and "DIAGONAL" not in unicodedata.name(char, ""):
+        # Box drawing joins at the cell edges. Font ascent/descent would leave
+        # gaps between every line, especially in thin ANSI and contour fonts.
+        name = unicodedata.name(char).removeprefix("BOX DRAWINGS ")
+        directions = set(name.split()) & {"LEFT", "RIGHT", "UP", "DOWN"}
+        if "HORIZONTAL" in name:
+            directions.update(("LEFT", "RIGHT"))
+        if "VERTICAL" in name:
+            directions.update(("UP", "DOWN"))
+        cx, cy = width // 2, height // 2
+        thickness = max(1, round(size / (9 if "HEAVY" in name else 18)))
+        for direction in directions:
+            double = "DOUBLE" in name and "DASH" not in name
+            # Mixed single/double junctions name the weight of each axis.
+            if "SINGLE" in name:
+                axis = "HORIZONTAL" if direction in {"LEFT", "RIGHT"} else "VERTICAL"
+                double = f"{direction} DOUBLE" in name or f"{axis} DOUBLE" in name
+            offsets = (-max(1, thickness), max(1, thickness)) if double else (0,)
+            for offset in offsets:
+                if direction == "LEFT":
+                    line = (0, cy + offset, cx, cy + offset)
+                elif direction == "RIGHT":
+                    line = (cx, cy + offset, width - 1, cy + offset)
+                elif direction == "UP":
+                    line = (cx + offset, 0, cx + offset, cy)
+                else:
+                    line = (cx + offset, cy, cx + offset, height - 1)
+                draw.line(line, fill=255, width=thickness)
+    elif 0x2591 <= code <= 0x2593:
+        # Stable terminal stippling, without a font's margins or overhang.
+        level = code - 0x2590
+        for y in range(height):
+            for x in range(width):
+                if ((x % 2) + 2 * (y % 2)) < level:
+                    draw.point((x, y), fill=255)
+    elif char == "▀":
         draw.rectangle((0, 0, width - 1, (height + 1) // 2 - 1), fill=255)
     elif 0x2581 <= code <= 0x2588:
         pixels = round(height * (code - 0x2580) / 8)
@@ -69,8 +110,7 @@ def _mask(char: str, size: int):
 
 def rasterize(grid: Grid, font_size: int = 18, background=(0, 0, 0)) -> Image.Image:
     """Paint a grid at its natural 1-column / 1-line geometry."""
-    font = _font(font_size)
-    cell_w, cell_h = max(1, round(font.getlength("M"))), sum(font.getmetrics())
+    cell_w, cell_h = cell_size(font_size)
     image = Image.new(
         "RGB", (max(1, grid.width * cell_w), max(1, grid.height * cell_h)), background
     )

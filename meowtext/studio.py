@@ -69,7 +69,8 @@ from meowtext.effects import (
     resolve_palette,
 )
 from meowtext.errors import MeowTextError, RenderError
-from meowtext.export import FORMATS, export
+from meowtext.export import FORMATS, FORMAT_LABELS, export_notice
+from meowtext.animation_export import export_design
 from meowtext.grid import Color, Grid
 from meowtext.palette import RelationPalette, used_slots, rgb_to_hsv
 from meowtext.packs import (
@@ -804,7 +805,7 @@ class MeowText(App):
                             )
                         yield Button("Pause / play", id="play")
                     yield Static(
-                        "Save keeps this animation's recipe and the frame you see. Use Watch in Save & use to play it in Kitty.",
+                        "HTML and Animated PNG keep your animation. PNG saves the visible frame. Save a project to keep editing; Watch plays it in Kitty.",
                         classes="help",
                     )
 
@@ -963,16 +964,17 @@ class MeowText(App):
                         )
                         yield Label("Export or open a project", classes="section-label")
                         yield Select(
-                            [(x.upper(), x) for x in (*FORMATS, "project")],
-                            value="ansi",
+                            [(FORMAT_LABELS[x], x) for x in (*FORMATS, "project")],
+                            value="html",
                             allow_blank=False,
                             id="format",
                         )
                         yield Input(
-                            self._suggested_name(self.project.text) + ".ans",
+                            self._suggested_name(self.project.text) + ".html",
                             placeholder="File path",
                             id="export-path",
                         )
+                        yield Static("", id="export-notice", markup=False)
                         yield Button("Export file", id="export-file")
                         yield Button("Open .meowtext project", id="open-project")
             with Vertical(id="sidebar"):
@@ -1260,6 +1262,7 @@ class MeowText(App):
                 patches=self.project.patches,
             )
             self.last_banner = Banner(grid, self.font, self._missing, self._folded)
+            self._export_notice()
             preview_grid = grid
             focused = self.query_one("#role-select", Choices).value
             if (
@@ -1528,6 +1531,7 @@ class MeowText(App):
         self._usage()
 
     def _auto_path(self, *, format_changed=False):
+        self._export_notice()
         widget = self.query_one("#export-path", Input)
         fmt = str(self.query_one("#format", Select).value)
         ext = {
@@ -2114,16 +2118,22 @@ class MeowText(App):
             if fmt == "project":
                 save_project(path, self.project)
             else:
-                data = export(self.last_banner.grid, fmt)
+                data = export_design(self.source, self.project, fmt, self.frame)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 (
                     path.write_bytes(data)
                     if isinstance(data, bytes)
                     else path.write_text(data, encoding="utf-8")
                 )
-            self._say(f"Exported {path}")
+            self._say(f"Exported {path}. " + export_notice(fmt, self.project.animation.name != "none"))
         except (MeowTextError, OSError, ValueError) as exc:
             self._say(str(exc))
+
+    def _export_notice(self):
+        fmt = str(self.query_one("#format", Select).value)
+        self.query_one("#export-notice", Static).update(
+            export_notice(fmt, self.project.animation.name != "none")
+        )
 
     def _usage(self):
         mode = str(self.query_one("#use-mode", Select).value)

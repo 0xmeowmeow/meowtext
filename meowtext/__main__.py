@@ -11,7 +11,7 @@ from meowtext.catalog import canonical, list_fonts
 from meowtext.compose import render_banner
 from meowtext.effects import OUTLINE_MODES, PALETTES, PRESETS, BannerStyle
 from meowtext.errors import MeowTextError, RenderError
-from meowtext.export import FORMATS, export
+from meowtext.export import FORMATS, export, export_notice
 from meowtext.grid import Color
 
 _SUFFIXES = {
@@ -22,6 +22,7 @@ _SUFFIXES = {
     ".htm": "html",
     ".json": "json",
     ".png": "png",
+    ".apng": "apng",
     ".kitty": "kitty",
     ".irc": "irc",
     ".md": "markdown",
@@ -79,6 +80,12 @@ def main(argv: list[str] | None = None) -> int:
     show.add_argument("text", nargs="*")
     show.add_argument("--format", choices=FORMATS, default="ansi")
     show.add_argument("-o", "--output")
+
+    artwork_export = commands.add_parser("export", help="export a project, including its animation")
+    artwork_export.add_argument("project", type=Path)
+    artwork_export.add_argument("--format", choices=FORMATS)
+    artwork_export.add_argument("-o", "--output", required=True)
+    artwork_export.add_argument("--frame", type=int, default=0, help="frame to use for a still (default: 0)")
 
     shell = commands.add_parser(
         "shell",
@@ -176,6 +183,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Saved {args.name}. Summon it: meowtext show {args.name}")
             return 0
         if args.command == "show":
+            project = library.load(args.name)
+            if args.format in {"html", "apng"}:
+                if args.text:
+                    project.text = " ".join(args.text)
+                    project.patches = ()
+                return _write(_export_project(project, args.format), args.output, args.format)
+            if project.animation.name != "none":
+                print(export_notice(args.format, True), file=sys.stderr)
             grid = (
                 library.render_project(
                     library.load(args.name), " ".join(args.text)
@@ -184,6 +199,12 @@ def main(argv: list[str] | None = None) -> int:
                 else library.artwork(args.name)
             )
             return _write(export(grid, args.format), args.output, args.format)
+        if args.command == "export":
+            from meowtext.project import load_project
+            fmt = args.format or _SUFFIXES.get(Path(args.output).suffix.lower(), "html")
+            project = load_project(args.project)
+            print(export_notice(fmt, project.animation.name != "none"), file=sys.stderr)
+            return _write(_export_project(project, fmt, args.frame), args.output, fmt)
         if args.command == "styles":
             print("Presets: " + ", ".join(PRESETS))
             print(
@@ -236,6 +257,20 @@ def _render(args: argparse.Namespace) -> int:
     fmt = fmt or "ansi"
     data = export(banner.grid, fmt)
     return _write(data, args.output, fmt)
+
+
+def _export_project(project, fmt, frame=0):
+    from meowtext import library
+    from meowtext.compose import layout_font
+    from meowtext.catalog import measure_spans
+    from meowtext.animation_export import export_design
+
+    font = library.project_font(project)
+    source, _, _ = layout_font(project.text, font, project.letters or None)
+    if project.style.outline and project.style.outline_scope == "letter" and not source.spans:
+        source.spans = measure_spans(font, project.text)
+    palette = library.prepare_roles(source, project)
+    return export_design(source, project, fmt, frame, palette)
 
 
 def _write(data: str | bytes, output: str | None, fmt: str) -> int:

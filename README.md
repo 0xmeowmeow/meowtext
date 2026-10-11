@@ -1,8 +1,10 @@
 # meowtext
 
-Compare fonts visually, decorate your words, and bring the result into Kitty.
+Compare fonts visually, decorate your words, and keep the result—including its animation.
 
-Meowtext is a terminal banner editor for Kitty on Linux. It uses FIGlet, TOIlet and TheDraw fonts, with the original Meowtext rendering and effects engines behind a new comparison-first interface.
+**[Open the browser studio →](https://meow-meow.io/meowtext/)** No installation needed. The Kitty edition is below.
+
+Meowtext is a banner editor for the browser and Kitty on Linux. Both use the same Python compositor, effects, cell rasteriser and export engine. The terminal edition uses FIGlet, TOIlet and TheDraw fonts; the browser bundles 569 FIGlet fonts through PyFIGlet and accepts imported TheDraw `.tdf` files. TOIlet rendering remains available in the Kitty edition.
 
 ![Meowtext decoration panel](docs/images/editor.png)
 
@@ -81,6 +83,30 @@ glow neon.md
 
 Markdown keeps the letter shapes in a code block. ANSI colours belong in terminal output; animated playback uses `watch` or `frame`. Meowtext can decorate the area around another TUI; it does not rewrite that application's internal theme or controls.
 
+## Export what you made
+
+HTML is the default export: a self-contained page with lossless rendered frames, fixed cell alignment, and Pause/Replay controls. It needs no installed fonts or network connection. Colour cycles repeat; trace drawing finishes and holds. Reduced-motion preferences start playback paused on the complete artwork.
+
+| Format | Preserves | Limits shown before export |
+| --- | --- | --- |
+| HTML | Colours, geometry, borders, shadows, animation | JavaScript is needed for playback; includes a still fallback and text alternative |
+| Animated PNG (`.apng`) | Lossless colour and animation | Some image viewers show only the first frame |
+| PNG / Kitty | The visible frame, including backgrounds and effects | Still image; animation is lost |
+| ANSI | Characters and true colours | Still; receiving terminal controls font and cell geometry |
+| IRC | Characters and approximate colours | Still; reduced to 16 IRC colours |
+| Text / Markdown | Character layout | Removes colour, painted backgrounds and motion |
+| JSON | One frame of cell data | Not a project or animation player |
+| `.meowtext` project | Editable recipe, colours, patches and motion settings | Reopen in Meowtext with the original font available |
+
+Pause the preview to choose a PNG still. Animation exports render a complete cycle at editor speed; excessive frame counts or image sizes produce an explanation instead of a silently truncated file. Keep a project as well if you want to edit the work again.
+
+```sh
+meowtext export design.meowtext -o design.html
+meowtext export design.meowtext -o design.apng
+meowtext export design.meowtext --frame 12 -o still.png
+meowtext show neon --format html -o neon.html
+```
+
 ## Effects that carry forward
 
 - Solid colours, named palettes, custom gradient stops, hard bands and six gradient directions.
@@ -102,9 +128,9 @@ A saved library design contains both the editable recipe and a frozen copy of it
 
 ## Fonts and exports
 
-System FIGlet/TOIlet fonts and `~/.config/meowtext/fonts` are discovered automatically. TheDraw `.tdf` files are read directly; the existing `~/.config/tdfgo/fonts` directory is also recognised. `meowtext fonts --fetch` downloads the optional extra FIGlet collection. Font files are not bundled with this repository; their original terms apply.
+The Kitty edition discovers system FIGlet/TOIlet fonts and `~/.config/meowtext/fonts` automatically. TheDraw `.tdf` files are read directly; the existing `~/.config/tdfgo/fonts` directory is also recognised. `meowtext fonts --fetch` downloads the optional extra FIGlet collection. The browser's PyFIGlet fonts and DejaVu raster font are bundled with their licenses in `web/vendor`; other font packs retain their original terms.
 
-Exports: ANSI, plain text, HTML, JSON cell data, PNG, Kitty graphics, IRC, Markdown and editable `.meowtext` projects. Still-image exports capture the current animation frame. PNG and Kitty previews use DejaVu Sans Mono.
+Exports include animated HTML and APNG, PNG stills, ANSI, text, JSON cell data, Kitty graphics, IRC, Markdown and editable `.meowtext` projects. PNG and Kitty previews use DejaVu Sans Mono with geometric block, shade and box-drawing cells.
 
 ```sh
 meowtext render "MEOW" -f standard --preset sunset-rim
@@ -126,3 +152,5 @@ python3 -m venv .venv
 ```
 
 The release tests cover font discovery, editor navigation, detailed effects and project round trips, naming, painting, animation playback parity, saved artwork, shell integration and command streams. Experimental instrument renderers remain in the source; their old reference galleries are local research tools, not part of the main editor workflow.
+
+Build the static browser edition with `.venv/bin/python web/build.py --download-runtime`, then serve `web/dist` over HTTP. Subsequent builds reuse the checksum-verified runtime. See [browser build notes](web/README.md).

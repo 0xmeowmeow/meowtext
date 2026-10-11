@@ -30,7 +30,43 @@ _MIRC: tuple[Color, ...] = (
     Color(210, 210, 210),
 )
 
-FORMATS = ("ansi", "plain", "html", "json", "png", "kitty", "irc", "markdown")
+FORMATS = ("html", "png", "apng", "ansi", "plain", "json", "kitty", "irc", "markdown")
+
+FORMAT_LABELS = {
+    "html": "HTML · artwork + animation",
+    "png": "PNG · still image",
+    "apng": "Animated PNG · lossless animation",
+    "ansi": "ANSI · terminal still",
+    "plain": "Plain text · no colour or motion",
+    "json": "JSON · cell data, one frame",
+    "kitty": "Kitty · still image",
+    "irc": "IRC · 16 colours, one frame",
+    "markdown": "Markdown · no colour or motion",
+    "project": "Project · editable recipe",
+}
+
+
+def export_notice(fmt: str, animated: bool = False) -> str:
+    """Explain the actual contract before a file is written."""
+    notices = {
+        "html": "Keeps cell alignment, colours, borders and shadows in a self-contained page.",
+        "png": "Still image of the frame currently shown. Keeps colours, borders and shadows.",
+        "apng": "Lossless animated PNG. Open in a modern browser; some image viewers show only its first frame.",
+        "ansi": "One frame with true colour. Appearance depends on the terminal's font and cell size.",
+        "plain": "Characters only: removes all colours, including painted backgrounds.",
+        "markdown": "Characters in a code block: removes all colours, including painted backgrounds.",
+        "json": "Cell data for one frame; this is not an editable project or animation player.",
+        "kitty": "Still image for the Kitty terminal.",
+        "irc": "One frame reduced to 16 IRC colours. Colours will change.",
+        "project": "Keeps editable settings and animation. Reopen in Meowtext; the original font is required.",
+    }
+    notice = notices.get(fmt, "")
+    if animated:
+        if fmt == "html":
+            notice += " Plays the animation at editor speed, with Pause and Replay controls."
+        elif fmt not in {"apng", "project"}:
+            notice += " Animation will be lost. Choose HTML or Animated PNG to keep it; pause first to choose a still."
+    return notice
 
 _MONO_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 
@@ -45,6 +81,7 @@ def export(grid: Grid, fmt: str) -> str | bytes:
         "html": to_html,
         "json": to_json,
         "png": to_png,
+        "apng": to_png,
         "kitty": to_kitty,
         "irc": to_irc,
         "markdown": to_markdown,
@@ -101,29 +138,9 @@ def to_ansi(grid: Grid) -> str:
 
 
 def to_html(grid: Grid) -> str:
-    body: list[str] = []
-    for row in grid.rows:
-        for cell in row:
-            styles: list[str] = []
-            if cell.fg is not None:
-                styles.append(f"color:{cell.fg.hex()}")
-            if cell.bg is not None:
-                styles.append(f"background:{cell.bg.hex()}")
-            char = _html_escape(cell.char or " ").replace(" ", "&nbsp;")
-            if styles:
-                body.append(f'<span style="{";".join(styles)}">{char}</span>')
-            else:
-                body.append(char)
-        body.append("\n")
-    picture = "".join(body)
-    return (
-        "<!DOCTYPE html>\n"
-        '<meta charset="utf-8">\n'
-        "<title>meowtext</title>\n"
-        '<pre style="margin:0;background:#000;color:#eee;line-height:1.05;'
-        "font-family:'DejaVu Sans Mono',ui-monospace,monospace\">"
-        f"{picture}</pre>\n"
-    )
+    from meowtext.animation_export import html_player
+
+    return html_player([to_png(grid)], grid)
 
 
 def to_json(grid: Grid) -> str:

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Compare fonts, make ANSI art, add motion, and export what you made. Meowtext runs in your browser.">
+  <title>Meowtext — make it move</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='6' fill='%23091017'/%3E%3Ctext x='4' y='29' font-size='28' fill='%2365e8ed'%3EM%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+<header><a class="brand" href="./" aria-label="Meowtext"><img src="assets/logo.png" alt="meowtext"></a><span class="tagline">words → artwork</span><nav><a href="/">meow-meow.io</a><a href="https://github.com/0xmeowmeow/meowtext">GitHub ↗</a></nav></header>
+<main>
+  <div class="compose-bar">
+    <label class="words">Your words<input id="words" value="meowtext" maxlength="240" spellcheck="false" disabled></label>
+    <button id="open" disabled>Open project</button><button id="save" disabled>Save project</button><button id="undo" disabled>Undo</button>
+  </div>
+  <section class="stage" aria-label="Your artwork">
+    <div class="stage-meta"><span id="dimensions">MEOWTEXT / BROWSER STUDIO</span><span id="motion-state">Preparing your tools</span></div>
+    <div id="art-wrap"><img id="art" src="assets/logo.png" alt="Your Meowtext artwork"></div>
+    <div class="stage-controls"><strong id="font-name">Make something worth keeping.</strong><div><button id="pause" disabled>Pause</button><button id="restart" disabled>Replay</button><button id="inspect" disabled>Full size</button><button id="paint" disabled>Paint cells</button></div></div>
+  </section>
+  <div id="status" role="status" aria-live="polite">Starting the renderer. The first visit downloads Python and the fonts; your designs stay in this browser.</div>
+  <nav class="tabs" aria-label="Studio sections"><button data-tab="fonts" aria-pressed="true">01 / Fonts</button><button data-tab="decorate" aria-pressed="false">02 / Decorate</button><button data-tab="export" aria-pressed="false">03 / Export</button><span>Arrows preview · Enter explores or tunes</span></nav>
+
+  <section id="fonts-panel" class="panel">
+    <div class="section-tools"><label>Find a direction<input id="search" type="search" placeholder="gothic, script, thin lines…" disabled></label><button id="back" disabled>← Back</button><button id="more" disabled>Another set →</button><button id="browse" disabled>Browse all</button><button id="import-font" disabled>Import .tdf font</button></div>
+    <div id="font-grid" class="font-grid inventory" aria-label="Font comparisons"></div>
+    <div class="panel-foot"><span id="font-count">Six choices at a time. Follow the shapes you like.</span><button id="similar" disabled>More like selected</button><button class="primary" data-tab="decorate">Use font → Decorate</button></div>
+  </section>
+
+  <section id="decorate-panel" class="panel" hidden>
+    <div class="banks">
+      <section class="bank"><div class="bank-heading"><h2><img src="assets/heading-looks.png" alt="Looks"></h2><button data-tune="look">Tune ↗</button></div><div id="looks" class="effect-grid inventory" aria-label="Looks"></div></section>
+      <section class="bank"><div class="bank-heading"><h2><img src="assets/heading-edges.png" alt="Edges"></h2><button data-tune="edge">Tune ↗</button></div><div id="edges" class="effect-grid inventory" aria-label="Edges"></div></section>
+      <section class="bank"><div class="bank-heading"><h2><img src="assets/heading-motion.png" alt="Motion"></h2><button data-tune="motion">Tune ↗</button></div><div id="motions" class="effect-grid inventory" aria-label="Motion"></div></section>
+    </div>
+    <div class="panel-foot"><span>Every specimen is rendered by Meowtext. Tune keeps the detailed controls one step away.</span><button class="primary" data-tab="export">Keep it → Export</button></div>
+  </section>
+
+  <section id="export-panel" class="panel" hidden>
+    <div class="export-layout"><div><h2>Take the artwork with you.</h2><p>HTML plays the complete animation in a standalone page. PNG is a still of the frame you see. Save a project to keep editing.</p><label>Format<select id="format" disabled></select></label><p id="export-notice" class="notice"></p><label>File name<input id="filename" value="meowtext.html" disabled></label><button id="download" class="primary" disabled>Download HTML</button></div><aside><h3>What survives the trip?</h3><table><thead><tr><th>Format</th><th>Colour</th><th>Motion</th></tr></thead><tbody><tr><td>HTML</td><td>Full</td><td>Yes</td></tr><tr><td>Animated PNG</td><td>Full</td><td>In supported viewers</td></tr><tr><td>PNG / Kitty</td><td>Full</td><td>Still frame</td></tr><tr><td>ANSI</td><td>Full</td><td>Still frame</td></tr><tr><td>IRC</td><td>16 colours</td><td>Still frame</td></tr><tr><td>Text / Markdown</td><td>None</td><td>None</td></tr><tr><td>Project</td><td>Editable</td><td>Editable recipe</td></tr></tbody></table><p>Image and HTML exports use fixed cell geometry. Terminal text depends on the receiving terminal’s font. HTML includes Pause and Replay; reduced-motion preferences start it paused.</p></aside></div>
+  </section>
+  <footer>Made with Meowtext’s own renderer. <a href="https://github.com/0xmeowmeow/meowtext">Get the Kitty edition</a> · <a href="PyFIGlet-LICENSE.txt">PyFIGlet</a> · <a href="DejaVu-LICENSE.txt">DejaVu</a> · <a href="pyodide/LICENSE">Pyodide</a><span>Projects are saved to your device. No account needed.</span></footer>
+</main>
+<dialog id="tune"><form method="dialog"><h2 id="tune-title">Tune</h2><button class="close" aria-label="Close settings">Close ×</button></form><div id="tune-controls" class="tune-controls"></div></dialog>
+<dialog id="full-size"><form method="dialog"><h2>Full size · scroll to inspect</h2><button class="close">Close ×</button></form><div class="full-scroll"><img id="full-art" alt="Artwork at native resolution"></div></dialog>
+<input type="file" id="project-file" accept=".meowtext,application/json" hidden><input type="file" id="font-file" accept=".tdf" hidden>
+<noscript>This editor needs JavaScript to run the renderer. The <a href="https://github.com/0xmeowmeow/meowtext">Kitty edition</a> works on Linux.</noscript>
+<script src="app.js" defer></script>
+</body></html>

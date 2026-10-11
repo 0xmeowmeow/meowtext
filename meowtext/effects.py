@@ -969,6 +969,9 @@ def trace(grid: Grid, animation: Animation, frame: int) -> Grid:
     clock = int(motion_clock(frame, animation))
     if animation.reveal == "runner":
         return _trace_runner(grid, order, clock)
+    if animation.direction == "backward":
+        order = list(reversed(order))
+        clock = abs(clock)
     return _trace_draw(grid, order, clock)
 
 

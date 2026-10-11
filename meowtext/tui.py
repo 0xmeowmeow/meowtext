@@ -42,7 +42,7 @@ from meowtext.effects import (
     colour_name,
 )
 from meowtext.errors import RenderError
-from meowtext.export import export
+from meowtext.export import export, export_notice, FORMAT_LABELS
 from meowtext.grid import Cell, Color, Grid
 from meowtext.packs import list_favourites, load_favourite, load_palettes, load_presets, load_symbols, save_favourite
 from meowtext.palette import RelationPalette, hsv_to_rgb, rgb_to_hsv, used_slots
@@ -54,6 +54,7 @@ _SUFFIX = {
     "html": ".html",
     "json": ".json",
     "png": ".png",
+    "apng": ".apng",
     "kitty": ".kitty",
     "irc": ".irc",
 }
@@ -79,9 +80,10 @@ _SIDES = (
 _FORMATS = (
     ("ANSI", "ansi"),
     ("Plain", "plain"),
-    ("HTML", "html"),
+    (FORMAT_LABELS["html"], "html"),
     ("JSON", "json"),
-    ("PNG", "png"),
+    (FORMAT_LABELS["png"], "png"),
+    (FORMAT_LABELS["apng"], "apng"),
     ("Kitty", "kitty"),
     ("IRC", "irc"),
 )
@@ -302,6 +304,7 @@ class MeowText(App):
             yield Button("Export", id="export")
             yield Button("Copy", id="copy")
             yield Button("Open", id="open")
+        yield Static("", id="export-notice", markup=False)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -448,7 +451,8 @@ class MeowText(App):
         if path.suffix == ".meowtext":
             path = path.with_suffix(_SUFFIX.get(fmt, ".ans"))
         try:
-            data = export(self.last_banner.grid, fmt)
+            from meowtext.animation_export import export_design
+            data = export_design(self._source, self._project(), fmt, self._frame, self._relations)
             path.parent.mkdir(parents=True, exist_ok=True)
             if isinstance(data, bytes):
                 path.write_bytes(data)
@@ -465,11 +469,12 @@ class MeowText(App):
             self.notify("Nothing to copy", severity="warning")
             return
         fmt = self._choice("format", "ansi")
-        if fmt == "png":
+        if fmt in {"png", "apng"}:
             self.notify("PNG is binary. Export it, or copy ANSI instead.", severity="warning")
             return
         try:
-            data = export(self.last_banner.grid, fmt)
+            from meowtext.animation_export import export_design
+            data = export_design(self._source, self._project(), fmt, self._frame, self._relations)
         except RenderError as exc:
             self.notify(str(exc), severity="error")
             return
@@ -1299,6 +1304,9 @@ class MeowText(App):
             meta.update(str(exc))
             return
         self.last_banner = banner
+        self.query_one("#export-notice", Static).update(
+            export_notice(self._choice("format", "ansi"), self._animation.name != "none")
+        )
         self._note_roles()
         self._show_frame()
         meta.update(self._describe(banner))
