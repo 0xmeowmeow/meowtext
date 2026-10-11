@@ -6,7 +6,7 @@ self.onmessage = event => {
     const {id, ...request} = event.data;
     try {
       if (!runtime) {
-        postMessage({status: 'Loading the renderer…'});
+        postMessage({status: 'Loading the renderer… The first visit can take a couple of minutes on a slow connection; later visits reuse downloaded files.'});
         await import('./pyodide/pyodide.js');
         runtime = await self.loadPyodide({indexURL: new URL('pyodide/', self.location.href).href});
         postMessage({status: 'Loading image tools and fonts…'});
