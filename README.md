@@ -4,9 +4,9 @@ Compare fonts visually, decorate your words, and keep the result—including its
 
 **[Open the browser studio →](https://meow-meow.io/meowtext/)** No installation needed. The Kitty edition is below.
 
-Meowtext is a banner editor for the browser and Kitty on Linux. Both use the same Python compositor, effects, cell rasteriser and export engine. The terminal edition uses FIGlet, TOIlet and TheDraw fonts; the browser bundles 569 FIGlet fonts through PyFIGlet and accepts imported TheDraw `.tdf` files. TOIlet rendering remains available in the Kitty edition.
+Meowtext is a banner editor for the browser and Kitty on Linux. Both use the same Python compositor, effects, cell rasteriser and export engine. The browser carries the visual inventory into a full-width studio, with arrow-key previews and detailed controls one Enter away. First visits show measured download progress and recovery controls; other fonts load only when selected. The terminal edition uses FIGlet, TOIlet and TheDraw fonts; the browser bundles 569 FIGlet fonts through PyFIGlet and accepts imported TheDraw `.tdf` files. TOIlet rendering remains available in the Kitty edition.
 
-![Meowtext decoration panel](docs/images/editor.png)
+![Meowtext browser inventory](docs/images/browser.png)
 
 ## Install
 
@@ -31,6 +31,10 @@ Open Kitty and run `meowtext`. If your shell has not picked up the new command y
 The installer creates an isolated Python environment and a launcher. It does not resize Kitty or change your terminal theme.
 
 ## Make something
+
+The Kitty edition keeps the same specimen inventories:
+
+![Meowtext decoration panel in Kitty](docs/images/editor.png)
 
 1. **Fonts:** compare six rendered choices, or nine in a large window. Arrows move between tiles, **Enter** explores similar shapes, **Space** uses the font, and **F** stars a favourite. Every round includes different directions to explore. Search understands words such as gothic, blackletter, script and thin. **I** inspects the focused font at full size.
 2. **Use font → Decorate:** your banner stays above three visual inventories: **Looks**, **Edges** and **Motion**. Each item shows its actual effect. **Tab** switches panels; **arrows** apply a choice immediately. Motion specimens animate. The active panel and item have bright, unmistakable highlights.
@@ -91,14 +95,15 @@ HTML is the default export: a self-contained page with lossless rendered frames,
 | --- | --- | --- |
 | HTML | Colours, geometry, borders, shadows, animation | JavaScript is needed for playback; includes a still fallback and text alternative |
 | Animated PNG (`.apng`) | Lossless colour and animation | Some image viewers show only the first frame |
-| PNG / Kitty | The visible frame, including backgrounds and effects | Still image; animation is lost |
+| Kitty (`.kitty`) | Colours, geometry and complete animation | Run `cat your-file.kitty` in Kitty 0.20 or newer; the terminal plays it after `cat` exits |
+| PNG | The visible frame, including backgrounds and effects | Still image; animation is lost |
 | ANSI | Characters and true colours | Still; receiving terminal controls font and cell geometry |
 | IRC | Characters and approximate colours | Still; reduced to 16 IRC colours |
 | Text / Markdown | Character layout | Removes colour, painted backgrounds and motion |
 | JSON | One frame of cell data | Not a project or animation player |
 | `.meowtext` project | Editable recipe, colours, patches and motion settings | Reopen in Meowtext with the original font available |
 
-Pause the preview to choose a PNG still. Animation exports render a complete cycle at editor speed; excessive frame counts or image sizes produce an explanation instead of a silently truncated file. Keep a project as well if you want to edit the work again.
+Saved animated designs start playing when opened in Kitty. The visible preview controls and F6 pause or resume them; F5 separately freezes the interface specimens. Pause the preview to choose a PNG still. Animation exports render a complete cycle at editor speed; excessive frame counts or image sizes produce an explanation instead of a silently truncated file. Keep a project as well if you want to edit the work again.
 
 ```sh
 meowtext export design.meowtext -o design.html
@@ -130,7 +135,7 @@ A saved library design contains both the editable recipe and a frozen copy of it
 
 The Kitty edition discovers system FIGlet/TOIlet fonts and `~/.config/meowtext/fonts` automatically. TheDraw `.tdf` files are read directly; the existing `~/.config/tdfgo/fonts` directory is also recognised. `meowtext fonts --fetch` downloads the optional extra FIGlet collection. The browser's PyFIGlet fonts and DejaVu raster font are bundled with their licenses in `web/vendor`; other font packs retain their original terms.
 
-Exports include animated HTML and APNG, PNG stills, ANSI, text, JSON cell data, Kitty graphics, IRC, Markdown and editable `.meowtext` projects. PNG and Kitty previews use DejaVu Sans Mono with geometric block, shade and box-drawing cells.
+Exports include animated HTML, Kitty and APNG, PNG stills, ANSI, text, JSON cell data, Kitty graphics, IRC, Markdown and editable `.meowtext` projects. PNG and Kitty previews use DejaVu Sans Mono with geometric block, shade and box-drawing cells.
 
 ```sh
 meowtext render "MEOW" -f standard --preset sunset-rim

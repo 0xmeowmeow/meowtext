@@ -31,11 +31,27 @@ def configure():
 
 
 configure()
-project = Project(text="meowtext", font_name="ansi_shadow", style=PRESETS["ice-rim"].clone(), animation=Animation(name="hue"))
+project = Project(text="meowtext", font_name="ansi_shadow", style=PRESETS["cyan"].clone(), animation=Animation(name="hue"))
 source = None
 source_key = None
 palette = None
 discovery = None
+
+
+def use_font_index():
+    """Font discovery covers the catalogue; files are fetched only when used."""
+    raw = json.loads(Path("/app/font-index.json").read_text())
+    catalog.figlet.font_index = lambda: {i["font"]["name"]: Path(i["font"]["name"] + ".flf") for i in raw}
+
+
+def configuration(items):
+    global discovery
+    discovery = Discovery(items)
+    return {"project": json.loads(dumps_project(project)), "choices": choice_data(),
+            "fonts": len(items), "looks": {k: _style_to(v) for k, v in PRESETS.items()},
+            "edges": OUTLINE_MODES, "motions": ANIMATIONS,
+            "palettes": list(PALETTES), "formats": FORMAT_LABELS,
+            "notices": {fmt: [export_notice(fmt, False), export_notice(fmt, True)] for fmt in FORMAT_LABELS}}
 
 
 def encode(grid):
@@ -88,12 +104,7 @@ def handle(message):
     if action == "init":
         raw = json.loads(Path("/app/font-index.json").read_text())
         items = [Specimen(FontInfo(**i["font"]), tuple(i["features"]), tuple(i["categories"])) for i in raw]
-        discovery = Discovery(items)
-        return {"project": json.loads(dumps_project(project)), "choices": choice_data(),
-                "fonts": len(items), "looks": {k: _style_to(v) for k, v in PRESETS.items()},
-                "edges": OUTLINE_MODES, "motions": ANIMATIONS,
-                "palettes": list(PALETTES), "formats": FORMAT_LABELS,
-                "notices": {fmt: [export_notice(fmt, False), export_notice(fmt, True)] for fmt in FORMAT_LABELS}}
+        return configuration(items)
     if action == "set":
         candidate = project_from_dict(message["project"])
         for label, value, low, high in (
@@ -126,17 +137,33 @@ def handle(message):
         elif mode == "back":
             discovery.back()
         elif mode == "narrow":
-            discovery.narrow(message["index"])
+            if message.get("font"):
+                font = FontInfo(**message["font"])
+                selected = next((i for i in discovery.all if i.font == font), None)
+                if selected is None:
+                    raise RenderError("Select a font before following its neighbours.")
+                discovery.narrow(selected)
+            else:
+                discovery.narrow(message["index"])
         return {"choices": choice_data(message.get("browse", False)), "total": len(discovery.scope)}
     if action == "specimen":
         font = FontInfo(**message["font"])
         grid, missing, _ = layout_font(message.get("text") or "Meow", font)
         if missing:
             raise RenderError("Missing glyphs: " + " ".join(missing))
-        return encode(present(grid, BannerStyle(gradient="ice")))
+        from io import BytesIO
+        output = BytesIO()
+        raster.rasterize(present(grid, PRESETS["cyan"]), background=(0,0,0,0)).save(output, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
     if action == "export":
         fmt = message["format"]
-        data = dumps_project(project) if fmt == "project" else export_design(current_source(), project, fmt, message.get("frame", 0), palette)
+        def progress(done, total):
+            try:
+                from js import postMessage, JSON
+            except ImportError:
+                return
+            postMessage(JSON.parse(json.dumps({"exportProgress":{"done":done, "total":total}})))
+        data = dumps_project(project) if fmt == "project" else export_design(current_source(), project, fmt, message.get("frame", 0), palette, progress=progress)
         if isinstance(data, str):
             data = data.encode("utf-8")
         return {"data": base64.b64encode(data).decode("ascii"), "notice": export_notice(fmt, project.animation.name != "none")}

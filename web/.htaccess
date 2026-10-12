@@ -1,11 +1,53 @@
 AddType application/wasm .wasm
 AddType text/javascript .mjs
 AddType image/apng .apng
-<IfModule mod_deflate.c>
-  AddOutputFilterByType DEFLATE text/javascript application/wasm application/json
+AddType font/woff2 .woff2
+# Serve the precompressed runtime when supported. The original remains a
+# fallback for local servers and clients without gzip support.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP:Accept-Encoding} br
+  RewriteCond %{REQUEST_FILENAME}.br -f
+  RewriteRule ^(.+\.(wasm|mjs|js|json))$ $1.br [L]
+  RewriteCond %{HTTP:Accept-Encoding} gzip
+  RewriteCond %{REQUEST_FILENAME}.gz -f
+  RewriteRule ^(.+\.(wasm|mjs|js|json))$ $1.gz [L]
 </IfModule>
+<FilesMatch "\.wasm\.br$">
+  ForceType application/wasm
+</FilesMatch>
+<FilesMatch "\.(mjs|js)\.br$">
+  ForceType text/javascript
+</FilesMatch>
+<FilesMatch "\.json\.br$">
+  ForceType application/json
+</FilesMatch>
+<FilesMatch "\.wasm\.gz$">
+  ForceType application/wasm
+</FilesMatch>
+<FilesMatch "\.(mjs|js)\.gz$">
+  ForceType text/javascript
+</FilesMatch>
+<FilesMatch "\.json\.gz$">
+  ForceType application/json
+</FilesMatch>
 <IfModule mod_headers.c>
-  <FilesMatch "^(index\.html|app\.js|worker\.js|runtime\.zip|style\.css)$">
+  <FilesMatch "\.(wasm|mjs|js|json)\.br$">
+    Header set Content-Encoding br
+    Header append Vary Accept-Encoding
+  </FilesMatch>
+  <FilesMatch "\.(wasm|mjs|js|json)\.gz$">
+    Header set Content-Encoding gzip
+    Header append Vary Accept-Encoding
+  </FilesMatch>
+  <FilesMatch "^(index\.html|app\.js|worker\.js|boot\.json|style\.css)$">
     Header set Cache-Control "no-cache"
   </FilesMatch>
+  <FilesMatch "\.(wasm|mjs|whl|zip|flf|tlf|woff2)(\.(gz|br))?$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+</IfModule>
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css text/javascript application/json
+  SetEnvIfNoCase Request_URI \.(gz|br)$ no-gzip
 </IfModule>

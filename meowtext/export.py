@@ -39,7 +39,7 @@ FORMAT_LABELS = {
     "ansi": "ANSI · terminal still",
     "plain": "Plain text · no colour or motion",
     "json": "JSON · cell data, one frame",
-    "kitty": "Kitty · still image",
+    "kitty": "Kitty · artwork + animation",
     "irc": "IRC · 16 colours, one frame",
     "markdown": "Markdown · no colour or motion",
     "project": "Project · editable recipe",
@@ -56,7 +56,7 @@ def export_notice(fmt: str, animated: bool = False) -> str:
         "plain": "Characters only: removes all colours, including painted backgrounds.",
         "markdown": "Characters in a code block: removes all colours, including painted backgrounds.",
         "json": "Cell data for one frame; this is not an editable project or animation player.",
-        "kitty": "Still image for the Kitty terminal.",
+        "kitty": "Exact artwork for Kitty. Display the downloaded file with cat in Kitty; other terminals may not support it.",
         "irc": "One frame reduced to 16 IRC colours. Colours will change.",
         "project": "Keeps editable settings and animation. Reopen in Meowtext; the original font is required.",
     }
@@ -64,8 +64,10 @@ def export_notice(fmt: str, animated: bool = False) -> str:
     if animated:
         if fmt == "html":
             notice += " Plays the animation at editor speed, with Pause and Replay controls."
+        elif fmt == "kitty":
+            notice += " Kitty plays the complete animation itself, even after cat exits. Requires Kitty 0.20 or newer."
         elif fmt not in {"apng", "project"}:
-            notice += " Animation will be lost. Choose HTML or Animated PNG to keep it; pause first to choose a still."
+            notice += " Animation will be lost. Choose HTML, Animated PNG or Kitty to keep it; pause first to choose a still."
     return notice
 
 _MONO_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"

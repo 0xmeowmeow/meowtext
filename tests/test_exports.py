@@ -69,11 +69,32 @@ class ExportFidelityTests(unittest.TestCase):
             self.assertEqual(final, to_png(present(self.source, self.project.style)))
 
     def test_export_notices_explain_actual_losses(self):
-        for fmt in ("png", "ansi", "kitty", "json", "plain", "markdown", "irc"):
+        for fmt in ("png", "ansi", "json", "plain", "markdown", "irc"):
             self.assertIn("Animation will be lost", export_notice(fmt, True))
         self.assertIn("backgrounds", export_notice("plain"))
         self.assertNotIn("Animation will be lost", export_notice("html", True))
         self.assertIn("first frame", export_notice("apng", True))
+        self.assertIn("complete animation", export_notice("kitty", True))
+
+    def test_kitty_contains_complete_frames_and_a_terminal_owned_clock(self):
+        data = export_design(self.source, self.project, "kitty")
+        packets = re.findall(r"\x1b_G([^;]*);(.*?)\x1b\\", data, re.S)
+        frames, buffer = [], ""
+        for header, payload in packets:
+            control = dict(item.split("=", 1) for item in header.split(","))
+            if control["a"] in {"t", "f"}:
+                buffer += payload
+                if control["m"] == "0":
+                    frames.append(base64.b64decode(buffer)); buffer = ""
+        self.assertEqual(len(frames), 30)
+        for index in (0, 7, 29):
+            expected = present(self.source, self.project.style, animation=self.project.animation, frame=index)
+            self.assertEqual(frames[index], to_png(expected))
+        self.assertIn("r=1,z=120", data)
+        self.assertIn("s=3,v=1", data)
+        self.assertNotIn("a=d", data)
+        self.project.animation = Animation(name="trace")
+        self.assertIn("s=3,v=2", export_design(self.source, self.project, "kitty"))
 
     def test_animation_period_includes_border_speed_and_limits(self):
         self.assertEqual(timeline(self.source, Animation(name="hue", speed=2), .5).count, 30)

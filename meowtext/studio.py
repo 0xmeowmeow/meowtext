@@ -303,9 +303,13 @@ class MeowText(App):
     Screen.short #decoration-preview { height: 4; min-height: 4; }
     Screen.narrow Showcase { display: none; }
     Screen.narrow #font-grid { grid-size: 1; }
+    #preview-transport { height: 1; background: #142e37; }
+    #preview-transport #decoration-meta { width: 1fr; }
+    #preview-transport Button { height: 1; min-width: 14; width: auto; border: none; padding: 0 1; }
     """
     BINDINGS = [
         Binding("f5", "ui_motion", "", show=False),
+        Binding("f6", "playback", "Play / pause", show=False),
         Binding("ctrl+z", "undo_effect", "Undo", show=False),
         Binding("alt+1", "bank('fill')", "", show=False, priority=True),
         Binding("alt+2", "bank('outline')", "", show=False, priority=True),
@@ -346,7 +350,7 @@ class MeowText(App):
         self.source = Grid()
         self.source_key = None
         self.frame = 0
-        self.playing = False
+        self.playing = self.project.animation.name != "none"
         self._syncing = False
         self._controls_ready = False
         self._index_ready = index is not None
@@ -389,7 +393,10 @@ class MeowText(App):
 
     def decoration(self) -> ComposeResult:
         yield Preview(id="decoration-preview")
-        yield Static("", id="decoration-meta", markup=False)
+        with Horizontal(id="preview-transport"):
+            yield Static("", id="decoration-meta", markup=False)
+            yield Button("Play · F6", id="preview-play")
+            yield Button("↺ Replay", id="preview-replay")
         with Horizontal(id="decoration-panels"):
             with Vertical(id="fill-pane", classes="bank"):
                 yield Lettering("LOOKS", id="fill-heading")
@@ -1124,6 +1131,14 @@ class MeowText(App):
             else "Interface motion paused · F5 resumes"
         )
 
+    def action_playback(self):
+        if self.project.animation.name == "none":
+            self._say("Choose a motion specimen to animate this artwork.")
+            return
+        self.playing = not self.playing
+        self._visibility()
+        self._say("Animation playing" if self.playing else "Animation paused · F6 resumes")
+
     def font_action(self, action, index):
         if index >= len(self.discovery.choices):
             return
@@ -1692,6 +1707,11 @@ class MeowText(App):
         self.query_one("#play", Button).label = (
             "Pause preview" if self.playing else "Play preview"
         )
+        self.query_one("#preview-play", Button).label = (
+            "Ⅱ Pause · F6" if self.playing else "▶ Play · F6"
+        )
+        self.query_one("#preview-play", Button).disabled = motion == "none"
+        self.query_one("#preview-replay", Button).disabled = motion == "none"
 
     def _adjust(self, id):
         if self._syncing:
@@ -1989,9 +2009,13 @@ class MeowText(App):
             self._dirty = True
             self._sync_controls()
             self._render_selected()
-        elif id == "play":
-            self.playing = not self.playing
+        elif id in {"play", "preview-play"}:
+            self.action_playback()
+        elif id == "preview-replay":
+            self.frame = 0
+            self.playing = self.project.animation.name != "none"
             self._visibility()
+            self._render_selected()
         elif id == "save-design":
             self._save()
         elif id == "copy-command":
@@ -2091,7 +2115,8 @@ class MeowText(App):
         self.font = library.project_font(project)
         self.project = project
         self.source_key = None
-        self.playing = False
+        self.frame = 0
+        self.playing = project.animation.name != "none"
         with self.query_one("#text").prevent(Input.Changed):
             self.query_one("#text", Input).value = project.text
         with self.query_one("#notes", TextArea).prevent(TextArea.Changed):

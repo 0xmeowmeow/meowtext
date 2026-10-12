@@ -356,7 +356,8 @@ class Discovery:
                 ):
                     candidates = [
                         i
-                        for i in distinct_shapes(self.pool, chosen)
+                        for i in distinct_shapes(sorted(self.pool, key=lambda item:
+                            re.sub(r"[_-]+", " ", item.font.name).casefold() != familiar.casefold()), chosen)
                         if category in i.categories
                     ]
                     if candidates and len(chosen) < self.count:
@@ -364,7 +365,7 @@ class Discovery:
                             min(
                                 candidates,
                                 key=lambda i: (
-                                    i.font.name != familiar,
+                                    re.sub(r"[_-]+", " ", i.font.name).casefold() != familiar.casefold(),
                                     abs(i.features[1] - 0.75)
                                     + abs(i.features[0] - 0.8),
                                     len(i.font.name),
@@ -425,8 +426,8 @@ class Discovery:
                     self.explorers.add(item.font.id)
         self.choices = chosen[: self.count]
 
-    def narrow(self, index: int) -> None:
-        seed = self.choices[index]
+    def narrow(self, index: int | Specimen) -> None:
+        seed = index if isinstance(index, Specimen) else self.choices[index]
         self.history.append(
             (
                 self.pool[:],

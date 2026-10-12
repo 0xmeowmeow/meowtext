@@ -3,5 +3,5 @@
 from meowtext.compose import render_banner
 from meowtext.grid import Cell, Color, Grid
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 __all__ = ["Cell", "Color", "Grid", "render_banner", "__version__"]

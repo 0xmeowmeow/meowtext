@@ -46,6 +46,27 @@ def _mask(char: str, size: int):
             directions.update(("UP", "DOWN"))
         cx, cy = width // 2, height // 2
         thickness = max(1, round(size / (9 if "HEAVY" in name else 18)))
+        if "ARC" in name:
+            # Rounded corners are not square elbows. Keep the same edge
+            # connections while leaving the corner's centre genuinely curved.
+            radius = max(1, min(width // 2, height // 2))
+            sx = 1 if "RIGHT" in directions else -1
+            sy = 1 if "DOWN" in directions else -1
+            ox, oy = cx + sx * radius, cy + sy * radius
+            angle = {(1,1):180, (1,-1):90, (-1,1):270, (-1,-1):0}[sx,sy]
+            draw.arc((ox-radius,oy-radius,ox+radius,oy+radius), angle, angle+90, fill=255, width=thickness)
+            draw.line((cx,cy+sy*radius,cx,height-1 if sy>0 else 0),fill=255,width=thickness)
+            draw.line((cx+sx*radius,cy,width-1 if sx>0 else 0,cy),fill=255,width=thickness)
+            return mask
+        if "DASH" in name:
+            count = 4 if "QUADRUPLE" in name else 3 if "TRIPLE" in name else 2
+            horizontal = "HORIZONTAL" in name
+            length = width if horizontal else height
+            for index in range(count):
+                start = round(index * length / count)
+                end = max(start, round((index + .65) * length / count) - 1)
+                draw.line((start,cy,end,cy) if horizontal else (cx,start,cx,end),fill=255,width=thickness)
+            return mask
         for direction in directions:
             double = "DOUBLE" in name and "DASH" not in name
             # Mixed single/double junctions name the weight of each axis.
@@ -54,14 +75,24 @@ def _mask(char: str, size: int):
                 double = f"{direction} DOUBLE" in name or f"{axis} DOUBLE" in name
             offsets = (-max(1, thickness), max(1, thickness)) if double else (0,)
             for offset in offsets:
+                hx, vy = cx, cy
+                if double and "SINGLE" not in name:
+                    horizontal = directions & {"LEFT", "RIGHT"}
+                    vertical = directions & {"UP", "DOWN"}
+                    if direction in horizontal and vertical:
+                        sx = 1 if direction == "RIGHT" else -1
+                        hx += sx * (max(1,thickness) if len(vertical)==2 else offset*(1 if "DOWN" in vertical else -1))
+                    if direction in vertical and horizontal:
+                        sy = 1 if direction == "DOWN" else -1
+                        vy += sy * (max(1,thickness) if len(horizontal)==2 else offset*(1 if "RIGHT" in horizontal else -1))
                 if direction == "LEFT":
-                    line = (0, cy + offset, cx, cy + offset)
+                    line = (0, cy + offset, hx, cy + offset)
                 elif direction == "RIGHT":
-                    line = (cx, cy + offset, width - 1, cy + offset)
+                    line = (hx, cy + offset, width - 1, cy + offset)
                 elif direction == "UP":
-                    line = (cx + offset, 0, cx + offset, cy)
+                    line = (cx + offset, 0, cx + offset, vy)
                 else:
-                    line = (cx + offset, cy, cx + offset, height - 1)
+                    line = (cx + offset, vy, cx + offset, height - 1)
                 draw.line(line, fill=255, width=thickness)
     elif 0x2591 <= code <= 0x2593:
         # Stable terminal stippling, without a font's margins or overhang.
@@ -112,7 +143,7 @@ def rasterize(grid: Grid, font_size: int = 18, background=(0, 0, 0)) -> Image.Im
     """Paint a grid at its natural 1-column / 1-line geometry."""
     cell_w, cell_h = cell_size(font_size)
     image = Image.new(
-        "RGB", (max(1, grid.width * cell_w), max(1, grid.height * cell_h)), background
+        "RGBA" if len(background) == 4 else "RGB", (max(1, grid.width * cell_w), max(1, grid.height * cell_h)), background
     )
     for y, row in enumerate(grid.rows):
         for x, cell in enumerate(row):

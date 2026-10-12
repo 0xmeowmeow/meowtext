@@ -19,6 +19,21 @@ from meowtext.studio import MeowText
 
 
 class GeometryTests(unittest.TestCase):
+    def test_rounded_dashed_and_double_strokes_keep_their_shapes(self):
+        from meowtext.raster import _mask, cell_size
+        width, height = cell_size()
+        cx, cy = width//2, height//2
+        corner = _mask("╭",18)
+        self.assertEqual(corner.getpixel((cx,cy)),0)
+        self.assertEqual(corner.getpixel((width-1,cy)),255)
+        self.assertEqual(corner.getpixel((cx,height-1)),255)
+        dash = _mask("┄",18)
+        self.assertIn(0,[dash.getpixel((x,cy)) for x in range(width)])
+        double = _mask("╔",18)
+        self.assertEqual(double.getpixel((cx-1,cy-1)),255)
+        self.assertEqual(double.getpixel((cx+1,cy+1)),255)
+        self.assertEqual(double.getpixel((cx,cy)),0)
+
     def test_blocks_are_exact_fractions_and_neighbours_do_not_overpaint(self):
         red, blue = Color(255, 0, 0), Color(0, 0, 255)
         g = Grid(
@@ -108,6 +123,32 @@ class DiscoveryInventoryTests(unittest.TestCase):
 
 
 class KeyboardInventoryTests(unittest.TestCase):
+    def test_saved_animation_starts_and_visible_transport_controls_it(self):
+        from meowtext.effects import Animation
+        from meowtext.project import Project
+
+        async def drive():
+            saved = Project(text="Meow", font_name="small", animation=Animation(name="hue"))
+            app = MeowText(saved, index=starter_index())
+            async with app.run_test(size=(150, 46)) as pilot:
+                await pilot.pause()
+                await pilot.press("f3")
+                await pilot.pause(0.35)
+                self.assertTrue(app.playing)
+                self.assertGreater(app.frame, 0)
+                self.assertTrue(app.query_one("#preview-play").display)
+                await pilot.press("f6")
+                frame = app.frame
+                await pilot.pause(0.3)
+                self.assertFalse(app.playing)
+                self.assertEqual(app.frame, frame)
+                app._open_project(saved)
+                self.assertTrue(app.playing)
+                self.assertEqual(app.frame, 0)
+
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"MEOWTEXT_HOME":tmp}):
+            asyncio.run(drive())
+
     def test_tab_arrows_tune_undo_and_small_terminal(self):
         async def drive():
             app = MeowText(index=starter_index())
