@@ -61,22 +61,32 @@ async function initialize() {
   const archive = cached.get(new URL(boot.renderer, self.location.href).href);
   candidate.unpackArchive(archive.bytes, 'zip', {extractDir:'/app'});
   phase = 'fonts'; progress(true);
-  candidate.runPython("import sys; sys.path.insert(0, '/app')\nimport bridge\nbridge.raster.MONO_FONT = '/app/DejaVuSansMono.ttf'\nbridge.use_font_index()");
+  candidate.runPython("import sys, os; os.chdir('/app'); sys.path.insert(0, '/app')\nimport bridge\nbridge.raster.MONO_FONT = '/app/DejaVuSansMono.ttf'\nbridge.use_font_index()");
   runtime = candidate;
   self.fetch = originalFetch;
   initialized = true;
 }
-async function ensureFont(name) {
-  const info = boot.fonts[name];
-  if (!info) return; // Python reports unknown names, including missing TDFs.
-  const path = '/app/pyfiglet/fonts/' + info.file;
+async function ensureFont(font) {
+  const name = font.name, source = font.source || '';
+  // An imported font takes precedence only for its exact project source.
+  if (font.engine === 'tdf' && source.startsWith('/app/fonts/')) return;
+  const key = font.engine === 'tdf' ? 'tdf:' + source.split('/').pop().toLowerCase() : font.engine + ':' + name;
+  const info = boot.fonts[key] || (font.engine === 'figlet' ? boot.fonts['toilet:' + name] : null);
+  if (!info) return; // Python reports unknown fonts without replacing the artwork.
+  const path = '/app/' + info.path;
   if (runtime.FS.analyzePath(path).exists) return;
-  if (!fontJobs.has(name)) fontJobs.set(name, (async () => {
+  if (!fontJobs.has(path)) fontJobs.set(path, (async () => {
     const response = await originalFetch(info.url);
     if (!response.ok) throw Error(`Could not download font ${name} (HTTP ${response.status}). Your previous artwork is safe; try again.`);
-    runtime.FS.writeFile(path, new Uint8Array(await response.arrayBuffer()));
-  })().catch(error => { fontJobs.delete(name); throw error; }));
-  await fontJobs.get(name);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (crypto.subtle) {
+      const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+      if ([...digest].map(b=>b.toString(16).padStart(2,'0')).join('') !== info.sha256) throw Error(`Font ${name} downloaded incompletely. Try again.`);
+    }
+    runtime.FS.mkdirTree(path.slice(0,path.lastIndexOf('/')));
+    runtime.FS.writeFile(path, bytes);
+  })().catch(error => { fontJobs.delete(path); throw error; }));
+  await fontJobs.get(path);
 }
 async function drain() {
   if (draining) return; draining = true;
@@ -88,8 +98,8 @@ async function drain() {
     const {id, ...request} = queue.splice(index,1)[0];
     try {
       if (!initialized) await initialize();
-      if (request.action === 'set' && request.project.engine === 'figlet') await ensureFont(request.project.font_name);
-      if (request.action === 'specimen' && request.font.engine === 'figlet') await ensureFont(request.font.name);
+      if (request.action === 'set') await ensureFont({engine:request.project.engine,name:request.project.font_name,source:request.project.font_source});
+      if (request.action === 'specimen') await ensureFont(request.font);
       runtime.globals.set('browser_request',JSON.stringify(request));
       const result = JSON.parse(runtime.runPython('bridge.dispatch(browser_request)'));
       postMessage({id,result});

@@ -8,7 +8,19 @@ let frame = 0, playing = !matchMedia('(prefers-reduced-motion: reduce)').matches
 let lastTick = performance.now(), choices = [], browse = false, page = 0, selected = 0, history = [], painting = false;
 let paintChar = '█', paintColor = '#65e8ed', filenameOwned = false, width = 0, height = 0;
 let tuneKind = null, tuneReturn = null, tuneTimer = null, tunePending = false, tuneRendering = false;
+let fontEngine = '', comparisonVersion = 0;
 const clone = value => JSON.parse(JSON.stringify(value));
+const fontIdentity = font => [font.engine, font.source, font.index || 0].join('\x1f');
+function isSelectedFont(choice) {
+  if (choice.engine !== project.engine) return false;
+  if(choice.engine !== 'tdf')return choice.name === project.font_name;
+  if(!choice.source.startsWith('/app/fonts/')&&!project.font_source.startsWith('/app/fonts/'))return choice.source.split('/').pop().toLowerCase()===project.font_source.split('/').pop().toLowerCase()&&choice.index===project.font_index;
+  return fontIdentity(choice) === fontIdentity({engine:project.engine,source:project.font_source,index:project.font_index});
+}
+function updateFontCounts(result) {
+  config.fonts=result.fonts;config.engines=result.engines;
+  for(const button of $('font-engines').children)button.textContent=button.dataset.label+' · '+(button.dataset.engine?config.engines[button.dataset.engine]:config.fonts).toLocaleString();
+}
 function status(message, error = false) { $('status').textContent = message; $('status').classList.toggle('error', error); }
 function createWorker(retry = false) {
   if (worker) worker.terminate();
@@ -69,15 +81,19 @@ function syncControls() {
   $('pause').innerHTML = (playing ? 'Ⅱ Pause' : '▶ Play') + ' <kbd>Alt P</kbd>';
   $('pause').disabled = !ready || project.animation.name === 'none'; $('restart').disabled = !ready || project.animation.name === 'none';
   $('motion-state').textContent = project.animation.name === 'none' ? 'STILL ARTWORK' : `${project.animation.name.toUpperCase()} / ${playing ? 'PLAYING' : 'PAUSED'} / ${String(displayedFrame).padStart(3,'0')}`;
-  document.querySelectorAll('.font-card').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.name === project.font_name)));
+  document.querySelectorAll('.font-card').forEach(b => b.setAttribute('aria-pressed', String(isSelectedFont(choices[Number(b.dataset.index)]))));
   document.querySelectorAll('#motions button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.value === project.animation.name)));
-  document.querySelectorAll('#edges button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.value === (project.style.outline ? project.style.outline_mode : 'off'))));
+  const shadow = Object.entries(config.shadows).find(([,preset])=>Object.entries(preset.style).every(([key,value])=>project.style[key]===value));
+  document.querySelectorAll('#edges button').forEach(b => {
+    const value=b.dataset.value;
+    b.setAttribute('aria-pressed',String(value.startsWith('shadow-') ? value===shadow?.[0] : value===(project.style.outline ? project.style.outline_mode : 'off')));
+  });
   $('undo').disabled = !history.length;
   const sameStyle = value => Object.keys(value).every(k => JSON.stringify(value[k]) === JSON.stringify(project.style[k]));
   const look = Object.keys(config.looks).find(k => sameStyle(config.looks[k]));
   document.querySelectorAll('#looks button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.value===look)));
   readout('look', look ? title(look) : 'Custom look');
-  readout('edge', project.style.outline ? title(project.style.outline_mode) : 'No border');
+  readout('edge', (project.style.outline ? title(project.style.outline_mode) : 'No border')+' + '+(shadow?.[1].label || 'Custom shadow'));
   readout('motion', project.animation.name === 'none' ? 'Still' : title(project.animation.name));
   document.querySelectorAll('.inventory').forEach(roving);
 }
@@ -112,7 +128,7 @@ async function chooseFont(index) {
   remember(); project.engine = choice.engine; project.font_name = choice.name;
   project.font_source = choice.source; project.font_index = choice.index;
   project.roles = {}; project.role_splits = []; project.letters = {}; project.patches = [];
-  await commit();
+  status('Opening '+choice.name+'…'); await commit();
 }
 let galleryVersion = 0;
 async function gallery(preloaded = false) {
@@ -124,7 +140,7 @@ async function gallery(preloaded = false) {
   await Promise.all(shown.map(async (choice, localIndex) => {
     const index = (browse ? page * 12 : 0) + localIndex;
     const button = document.createElement('button'); button.className = 'font-card'; button.dataset.name = choice.name; button.dataset.index = index;
-    button.setAttribute('aria-pressed', String(choice.name === project.font_name)); button.disabled = !ready;
+    button.setAttribute('aria-pressed', String(isSelectedFont(choice))); button.disabled = !ready;
     const specimen = document.createElement('span'); specimen.className = 'specimen';
     const picture = document.createElement('img'); picture.alt = ''; specimen.append(picture);
     const name = document.createElement('b'); name.textContent = choice.name;
@@ -135,19 +151,21 @@ async function gallery(preloaded = false) {
     button.onkeydown = event => { if (event.key === 'Enter' && !browse) { event.preventDefault(); selected = index; chooseFont(index).then(()=>compare('narrow')); } };
     grid.append(button);
     try {
-      const result = preloaded ? bootstrap.specimens[choice.name] : await rpc('specimen', {font:{engine:choice.engine,name:choice.name,source:choice.source,index:choice.index},text:project.text});
+      const result = preloaded ? bootstrap.specimens[fontIdentity(choice)] : await rpc('specimen', {font:{engine:choice.engine,name:choice.name,source:choice.source,index:choice.index},text:project.text});
       if (version === galleryVersion) picture.src = result;
-    } catch (error) { desc.textContent = error.message; button.disabled = true; }
+    } catch (error) { desc.textContent = error.message; button.disabled = !ready; }
   }));
   if (version === galleryVersion) roving(grid);
 }
 async function compare(mode) {
   if (!ready) return;
+  const version = ++comparisonVersion;
   try {
     if (browse && ['more','back'].includes(mode)) { page = Math.max(0, Math.min(Math.ceil(choices.length / 12) - 1, page + (mode === 'more' ? 1 : -1))); return gallery(); }
     if(mode==='narrow')browse=false;
     const font=mode==='narrow'?{engine:project.engine,name:project.font_name,source:project.font_source,index:project.font_index}:null;
-    const result = await rpc('compare', {mode, font, index:selected, query:$('search').value, browse});
+    const result = await rpc('compare', {mode, font, index:selected, query:$('search').value, engine:fontEngine, browse});
+    if (version !== comparisonVersion) return;
     choices = result.choices; selected = 0; page = 0; await gallery(); roving($('font-grid'));
     if (['narrow','more','back'].includes(mode)) $('font-grid').querySelector('button')?.focus();
   } catch (error) { report(error); }
@@ -158,7 +176,7 @@ function effectBank(id, values, kind, asset, callback) {
     const img = document.createElement('img'); img.src = `assets/${asset}-${value}.png`; img.alt = ''; img.loading = 'lazy';
     const text = document.createElement('span'); text.textContent = title(label); button.append(img,text);
     button.onclick = () => { if (!ready) return; closeTune(false); remember(); callback(value); document.querySelectorAll(`#${id} button`).forEach(b => b.setAttribute('aria-pressed', String(b === button))); commit(); };
-    button.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); tune(kind); } };
+    button.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); tune(kind,{field:value.startsWith('shadow-')?'shadow':null}); } };
     $(id).append(button);
   }
 }
@@ -258,7 +276,7 @@ function motionFields() {
     field.hidden=['travel','layers'].includes(key)?!['hue','march'].includes(name):['pattern','reveal'].includes(key)?name!=='trace':false;
   }
 }
-function tune(kind, {focus = true} = {}) {
+function tune(kind, {focus = true, field:focusField = null} = {}) {
   if (!ready) return;
   if (activeTab !== 'decorate') tab('decorate');
   if (focus) tuneReturn = document.activeElement;
@@ -308,8 +326,10 @@ function tune(kind, {focus = true} = {}) {
   });
   if (focus) {
     $('decorate-panel').scrollTop = 0;
-    $('tune-controls').querySelector('input,select,textarea')?.focus({preventScroll:true});
+    const control = (focusField && $('tune-controls').querySelector(`[data-field="${focusField}"] input`)) || $('tune-controls').querySelector('input,select,textarea');
+    control?.focus({preventScroll:true});
     if (matchMedia('(max-width:900px)').matches) $('tune').scrollIntoView({block:'start'});
+    if(focusField)control?.scrollIntoView({block:'nearest'});
   }
 }
 function downloadBytes(bytes, name, type) {
@@ -349,13 +369,15 @@ $('art').onclick = event => {
 $('open').onclick = () => $('project-file').click(); $('import-font').onclick = () => $('font-file').click();
 $('project-file').onchange = async event => {
   const file=event.target.files[0]; if(!file)return;
-  try { if(file.size>2000000)throw Error('Projects must be smaller than 2 MB.'); const candidate=JSON.parse(await file.text()); if(candidate.meowtext!=='project')throw Error('Choose a .meowtext project file.'); remember(); project=candidate; playing=project.animation?.name!=='none'&&samplesMoving; await commit(); if(!valid)status('Could not open this project. Import its original .tdf font first, or install the Kitty edition for TOIlet fonts. Undo returns to your previous artwork.',true); }
+  try { if(file.size>2000000)throw Error('Projects must be smaller than 2 MB.'); const candidate=JSON.parse(await file.text()); if(candidate.meowtext!=='project')throw Error('Choose a .meowtext project file.'); remember(); project=candidate; playing=project.animation?.name!=='none'&&samplesMoving; await commit(); if(!valid)status('Could not open this project. If it uses a custom font, import its original .tdf file first. Undo returns to your previous artwork.',true); }
   catch(error){report(error);} finally {event.target.value='';}
 };
 $('font-file').onchange = async event => {
   const file=event.target.files[0];if(!file)return;
   try { if(file.size>2000000)throw Error('Font files must be smaller than 2 MB.'); const bytes=new Uint8Array(await file.arrayBuffer());let raw='';for(const b of bytes)raw+=String.fromCharCode(b); const data=btoa(raw), result=await rpc('font',{name:file.name,data});
     let cached=false;try{const cache=await caches.open('meowtext-user-fonts-v1');await cache.put(new URL('user-fonts/'+encodeURIComponent(file.name),location.href),new Response(data));cached=true;}catch(_){}
+    updateFontCounts(result);fontEngine='tdf';$('search').value=result.name;
+    document.querySelectorAll('#font-engines button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.engine==='tdf')));
     choices=result.choices;browse=false;page=0;await gallery();tab('fonts');status('Imported '+result.name+'. Select a specimen or reopen its project. '+(cached?'Font saved in this browser.':'The font stays in this tab; import it again next visit.')); }
   catch(error){report(error);}finally{event.target.value='';}
 };
@@ -432,7 +454,7 @@ async function start(retry = false) {
     }
     if(changed){project.text=typed;project.patches=[];}
     goodProject=null;
-    if(project.engine==='tdf')await restoreFonts();
+    await restoreFonts();
     ready=true;
     document.querySelectorAll('[disabled]').forEach(el=>el.disabled=false);
     let ok=await commit();
@@ -453,15 +475,25 @@ async function restoreFonts(){
     const cache=await caches.open('meowtext-user-fonts-v1');
     for(const key of await cache.keys()){
       const response=await cache.match(key);const data=await response.text();
-      await rpc('font',{name:decodeURIComponent(new URL(key.url).pathname.split('/').pop()),data});
+      updateFontCounts(await rpc('font',{name:decodeURIComponent(new URL(key.url).pathname.split('/').pop()),data}));
     }
   }catch(error){status('Saved font files could not be restored. Import the original .tdf file again.',true);}
 }
 $('retry').onclick=()=>start(true);
 config=bootstrap;project=clone(config.project);choices=config.choices;
+for (const [engine,label] of [['','All fonts'],['figlet','FIGlet'],['toilet','TOIlet'],['tdf','TheDraw']]) {
+  const button=document.createElement('button');button.dataset.engine=engine;button.dataset.label=label;button.disabled=true;
+  button.textContent=label+' · '+(engine?config.engines[engine]:config.fonts).toLocaleString();
+  button.setAttribute('aria-pressed',String(!engine));
+  button.onclick=()=>{fontEngine=engine;document.querySelectorAll('#font-engines button').forEach(b=>b.setAttribute('aria-pressed',String(b===button)));compare('reset');};
+  $('font-engines').append(button);
+}
 for(const [value,label] of Object.entries(config.formats)){const option=document.createElement('option');option.value=value;option.textContent=label;$('format').append(option);}
 effectBank('looks',Object.keys(config.looks).map(k=>[k,k]),'look','look',value=>project.style=clone(config.looks[value]));
-effectBank('edges',[['No border','off'],...config.edges],'edge','edge',value=>{project.style.outline=value!=='off';if(value!=='off')project.style.outline_mode=value;});
+effectBank('edges',[['No border','off'],...config.edges,...Object.entries(config.shadows).map(([key,preset])=>[preset.label,key])],'edge','edge',value=>{
+  if(config.shadows[value])Object.assign(project.style,clone(config.shadows[value].style));
+  else {project.style.outline=value!=='off';if(value!=='off')project.style.outline_mode=value;}
+});
 effectBank('motions',config.motions,'motion','motion',value=>{project.animation.name=value;playing=value!=='none'&&samplesMoving;});
 gallery(true);samples();syncControls();
 const reducedPreference=matchMedia('(prefers-reduced-motion: reduce)');

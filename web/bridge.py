@@ -10,7 +10,7 @@ from meowtext.ansi import fit_width, parse_ansi
 from meowtext.catalog import FontInfo
 from meowtext.compose import layout_font, present
 from meowtext.discovery import Discovery, Specimen, describe
-from meowtext.effects import Animation, BannerStyle, PRESETS, OUTLINE_MODES, ANIMATIONS, PALETTES, TRACE_PATTERNS
+from meowtext.effects import Animation, BannerStyle, PRESETS, OUTLINE_MODES, ANIMATIONS, PALETTES, TRACE_PATTERNS, SHADOW_STYLES
 from meowtext.errors import RenderError
 from meowtext.export import to_png, FORMAT_LABELS, export_notice
 from meowtext.animation_export import export_design
@@ -24,10 +24,15 @@ def browser_figlet(text, name):
 
 def configure():
     catalog.figlet.render = browser_figlet
+    catalog.toilet.render = browser_figlet
     catalog.figlet.available = lambda: True
-    catalog.figlet.font_index = lambda: {name: Path(name + ".flf") for name in pyfiglet.FigletFont.getFonts()}
-    catalog.toilet.font_index = lambda: {}
-    catalog._TDF = []
+    catalog.toilet.available = lambda: True
+    # Relative sources survive both the build directory and /app in Pyodide.
+    catalog.figlet.font_index = lambda: {p.stem: p for p in Path("pyfiglet/fonts").glob("*.flf")}
+    catalog.toilet.font_index = lambda: {p.stem: p for p in Path("pyfiglet/fonts").glob("*.tlf")}
+    catalog._TDF = [FontInfo("tdf", h.name, str(p), h.index, h.kind)
+                    for p in sorted(Path("fonts/builtin").glob("*.TDF"))
+                    for h in catalog.tdf_engine.peek_file(p)]
 
 
 configure()
@@ -41,15 +46,26 @@ discovery = None
 def use_font_index():
     """Font discovery covers the catalogue; files are fetched only when used."""
     raw = json.loads(Path("/app/font-index.json").read_text())
-    catalog.figlet.font_index = lambda: {i["font"]["name"]: Path(i["font"]["name"] + ".flf") for i in raw}
+    fonts = [FontInfo(**i["font"]) for i in raw]
+    catalog.figlet.font_index = lambda: {f.name: Path(f.source) for f in fonts if f.engine == "figlet"}
+    catalog.toilet.font_index = lambda: {f.name: Path(f.source) for f in fonts if f.engine == "toilet"}
+    catalog._TDF = [f for f in fonts if f.engine == "tdf"]
 
 
 def configuration(items):
     global discovery
     discovery = Discovery(items)
+    default = next(i for i in items if i.font.engine == project.engine and i.font.name == project.font_name)
+    # The public collections include both "ANSI Shadow" and "ansi_shadow".
+    # Keep the actual default selected in the opening comparison.
+    discovery.choices[0] = default
     return {"project": json.loads(dumps_project(project)), "choices": choice_data(),
-            "fonts": len(items), "looks": {k: _style_to(v) for k, v in PRESETS.items()},
+            "fonts": len(items), "engines": {key: sum(i.font.engine == key for i in items) for key in ("figlet", "toilet", "tdf")},
+            "looks": {k: _style_to(v) for k, v in PRESETS.items()},
             "edges": OUTLINE_MODES, "motions": ANIMATIONS, "tracePatterns": TRACE_PATTERNS,
+            "shadows": {key: {"label": label, "style": {name: value.hex() if hasattr(value, "hex") else value
+                                                       for name, value in style.items()}}
+                        for key, (label, style) in SHADOW_STYLES.items()},
             "palettes": list(PALETTES), "formats": FORMAT_LABELS,
             "notices": {fmt: [export_notice(fmt, False), export_notice(fmt, True)] for fmt in FORMAT_LABELS}}
 
@@ -58,16 +74,27 @@ def encode(grid):
     return "data:image/png;base64," + base64.b64encode(to_png(grid)).decode("ascii")
 
 
+def resolve_font(font):
+    if font.engine == "tdf" and font.source:
+        exact = next((f for f in catalog._TDF if f.source == font.source and f.index == font.index), None)
+        if exact:
+            return exact
+        if font.source.startswith("/app/fonts/"):
+            raise RenderError("Import the original .tdf file for this project: " + Path(font.source).name)
+        portable = next((f for f in catalog._TDF if Path(f.source).name.casefold() == Path(font.source).name.casefold() and f.index == font.index), None)
+        if portable:
+            return portable
+    return catalog.resolve(font.engine, font.name)
+
+
 def current_source():
     global source, source_key, palette
     key = (project.engine, project.font_name, project.font_source, project.font_index, project.text,
            json.dumps(json.loads(dumps_project(project))["letters"], sort_keys=True),
            project.role_splits, project.style.outline_scope, project.animation.name == "trace")
     if source is None or key != source_key:
-        font = None
-        if project.engine == "tdf" and project.font_source:
-            font = next((f for f in catalog._TDF if Path(f.source).name == Path(project.font_source).name and f.index == project.font_index), None)
-        font = font or catalog.resolve(project.engine, project.font_name)
+        # Source identity must agree for rendering and similarity exploration.
+        font = resolve_font(FontInfo(project.engine, project.font_name, project.font_source, project.font_index))
         source, missing, folded = layout_font(project.text, font, project.letters or None)
         if source.width * source.height > 20000:
             raise RenderError("This artwork is too large for the browser. Shorten the text or choose a smaller font.")
@@ -107,6 +134,9 @@ def handle(message):
         return configuration(items)
     if action == "set":
         candidate = project_from_dict(message["project"])
+        # Early web releases labelled the bundled TOIlet fonts as FIGlet.
+        if candidate.engine == "figlet" and candidate.font_name not in catalog.figlet.font_index() and candidate.font_name in catalog.toilet.font_index():
+            candidate.engine = "toilet"
         for label, value, low, high in (
             ("Motion speed", candidate.animation.speed, .05, 10),
             ("Border speed", candidate.style.outline_speed, .05, 10),
@@ -131,15 +161,16 @@ def handle(message):
     if action == "compare":
         mode = message.get("mode", "reset")
         if mode == "reset":
-            discovery.reset(query=message.get("query", ""))
+            engine = message.get("engine", "")
+            discovery.reset(query=" ".join(filter(None, (message.get("query", ""), engine))))
         elif mode == "more":
             discovery.more()
         elif mode == "back":
             discovery.back()
         elif mode == "narrow":
             if message.get("font"):
-                font = FontInfo(**message["font"])
-                selected = next((i for i in discovery.all if i.font == font), None)
+                font = resolve_font(FontInfo(**message["font"]))
+                selected = next((i for i in discovery.all if i.font.id == font.id), None)
                 if selected is None:
                     raise RenderError("Select a font before following its neighbours.")
                 discovery.narrow(selected)
@@ -153,7 +184,8 @@ def handle(message):
             raise RenderError("Missing glyphs: " + " ".join(missing))
         from io import BytesIO
         output = BytesIO()
-        raster.rasterize(present(grid, PRESETS["cyan"]), background=(0,0,0,0)).save(output, format="PNG")
+        # Show the authored ANSI colours in the catalogue.
+        raster.rasterize(present(grid, PRESETS["plain"] if font.engine == "tdf" else PRESETS["cyan"]), background=(0,0,0,0)).save(output, format="PNG")
         return "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
     if action == "export":
         fmt = message["format"]
@@ -184,15 +216,22 @@ def handle(message):
         catalog._PARSED.pop(str(path), None)
         catalog._TDF = [f for f in catalog._TDF if f.source != str(path)]
         discovery.all = [i for i in discovery.all if i.font.source != str(path)]
+        imported = []
         for n, f in enumerate(fonts):
             info = FontInfo("tdf", f.name, str(path), n, f.kind)
             catalog._TDF.append(info)
             try:
-                discovery.all.append(describe(catalog.render(info, "MEOW").grid, info))
+                item = describe(catalog.render(info, "MEOW").grid, info)
+                discovery.all.append(item)
+                imported.append(item)
             except RenderError:
                 pass
         discovery.reset(query=fonts[0].name)
-        return {"choices": choice_data(), "name": fonts[0].name}
+        if imported:
+            # A same-shaped bundled face must not hide the newly imported file.
+            discovery.narrow(imported[0])
+        return {"choices": choice_data(), "name": fonts[0].name, "fonts": len(discovery.all),
+                "engines": {key: sum(i.font.engine == key for i in discovery.all) for key in ("figlet", "toilet", "tdf")}}
     raise RenderError("Unknown browser action")
 
 

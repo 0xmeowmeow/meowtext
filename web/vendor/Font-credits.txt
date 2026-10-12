@@ -1,0 +1,35 @@
+Meowtext font collections
+
+FIGlet and TOIlet
+----------------
+PyFIGlet 1.0.4 includes FIGlet and TOIlet fonts. See PyFIGlet-LICENSE.txt.
+The additional collection is xero/figlet-fonts, revision
+417429ef36ab039cbf192a4424c60aa23fc32de8:
+https://github.com/xero/figlet-fonts/tree/417429ef36ab039cbf192a4424c60aa23fc32de8
+
+Each font retains its original embedded author and redistribution notices.
+TOIlet's font package notice is included in TOIlet-LICENSE.txt. Fonts shared
+by both collections use the version bundled with PyFIGlet.
+
+TheDraw
+-------
+1,198 TDF files, including colour, block and outline faces, from tdfiglet:
+https://github.com/tat3r/tdfiglet/tree/0225b8881d06773b92d9db2c7881f03ff0bdece7
+
+Both fonts/ and unused-fonts/ are included: Meowtext can read all three
+TheDraw font formats. Font data and embedded names are unchanged; filenames
+are uppercased for consistent portable project sources. Original authorship
+is retained. See TheDraw-LICENSE.txt for the upstream distribution notice.
+
+The source revisions and archive SHA-256 are recorded in catalogue-fonts.json.
+The browser catalogue excludes fonts that have no visible sample; their
+original files remain in the collection. Font families may have several
+colour variants. Comparisons reduce duplicate shapes; Browse all retains
+every indexed variant.
+
+Rendering
+---------
+DejaVu Sans Mono supplies the cell glyphs: see DejaVu-LICENSE.txt.
+
+Custom fonts imported into the studio remain on your device. They are not
+included in these public collections or uploaded to the website.

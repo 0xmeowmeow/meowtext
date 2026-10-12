@@ -2,9 +2,11 @@
 
 The browser studio carries the accepted Meowtext inventory into the web: a full-width artwork, three banks of real specimens, large comparison previews, immediate arrow-key selection and details one Enter away. Its headings and logo are rendered lettering. The desktop's approved design remains the source of this arrangement.
 
+Edges includes six shadow specimens plus No shadow. Border and shadow tiles remain independently selected, and Enter on a shadow goes directly to its live controls.
+
 Tune expands below the artwork and above the specimen banks. Controls preview changes as you type or adjust colours, without covering the artwork. Long settings scroll with the preview still visible, including on phones. Escape returns focus to the specimen or button that opened Tune; Undo restores both the artwork and open controls.
 
-A module worker runs the shared Python compositor, palette, discovery, rasteriser and exports through Pyodide 314.0.7. PyFIGlet replaces the desktop FIGlet subprocess. TheDraw imports use the same parser. TOIlet rendering, individual glyph editing and role splitting remain desktop controls; existing project patches, letter overrides, roles and notes survive browser project round trips.
+A module worker runs the shared Python compositor, palette, discovery, rasteriser and exports through Pyodide 314.0.7. PyFIGlet reads FIGlet and TOIlet fonts in place of their desktop subprocesses. TheDraw uses the same colour, block and outline parser as the desktop. Individual glyph editing and role splitting remain desktop controls; existing project patches, letter overrides, roles and notes survive browser project round trips.
 
 ## Build and serve
 
@@ -16,12 +18,12 @@ A module worker runs the shared Python compositor, palette, discovery, rasterise
 .venv/bin/python -m http.server 8000 --directory web/dist
 ```
 
-Omit `--download-runtime` after the first build. Runtime files are pinned by SHA-256 in `runtime-manifest.json` and verified on every build. The worker also verifies its startup payloads where Web Crypto is available. `vendor/` retains the PyFIGlet 1.0.4 wheel, DejaVu font and their licenses. The wheel SHA-256 is `65b57b7a8e1dff8a67dc8e940a117238661d5e14c3e49121032bd404d9b2b39f`. `lettering.json` holds the glyph grids for the accepted inventory headings, so builds do not require TOIlet.
+Omit `--download-runtime` after the first build. Runtime files are pinned by SHA-256 in `runtime-manifest.json` and verified on every build. The worker also verifies its startup payloads where Web Crypto is available. `vendor/` retains the PyFIGlet 1.0.4 wheel, DejaVu font and their licenses. The wheel SHA-256 is `65b57b7a8e1dff8a67dc8e940a117238661d5e14c3e49121032bd404d9b2b39f`. `vendor/catalogue-fonts.json` pins the additional public font archive and its upstream revisions. `vendor/Font-credits.txt` preserves provenance and points to the original notices. Four FIGlet files cannot render the index sample (one has a malformed header), and three TheDraw members contain no visible sample; the original font files are retained in the archive. No installed user font cache is copied into publication. `lettering.json` holds the glyph grids for the accepted inventory headings, so builds do not require TOIlet.
 
 The build creates:
 
 - A pre-rendered animated sample and first font specimens, embedded catalogue metadata, and a subset of DejaVu for stable UI metrics.
-- A roughly 356 KB renderer archive containing the shared modules and starter fonts. Remaining fonts are fetched individually when used; all 569 fonts remain discoverable.
+- A roughly 600 KB renderer archive containing the shared modules, catalogue metadata and starter fonts. Remaining files download individually with SHA-256 checks when used. The catalogue contains 881 FIGlet, 24 TOIlet and 3,708 TheDraw fonts and colour variants. Collection filters supplement comparison-first browsing; Browse all keeps the variants.
 - Versioned Pyodide files and precompressed gzip/Brotli alternatives, plus a download manifest with checksums and exact decoded sizes.
 
 ## Readiness and recovery
@@ -30,7 +32,7 @@ Before editing is ready, the sample is labelled as a sample. The loader shows ac
 
 The largest download is still Python. On a slow connection the first visit can take a minute or more; subsequent visits reuse the runtime. Startup never uploads the user's text. The main thread accepts input independently; selected edits take priority over speculative thumbnail renders. Animation exports report completed frame counts while rendering.
 
-The current draft is stored locally, and imported TheDraw fonts are cached in the browser where storage is available. Save a `.meowtext` file for a durable editable copy. A browser that refuses storage explicitly says so. The original font is still needed when moving a project to another device.
+The current draft is stored locally, and imported TheDraw fonts are cached in the browser where storage is available. Save a `.meowtext` file for a durable editable copy. A browser that refuses storage explicitly says so. Bundled fonts are found automatically when opening desktop projects, including TheDraw file/member selections. Custom imported fonts still need their original files when moving to another device. An imported font never silently falls back to a bundled file with the same name.
 
 ## Deploy and verify
 

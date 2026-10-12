@@ -4,7 +4,7 @@ Compare fonts visually, decorate your words, and keep the result—including its
 
 **[Open the browser studio →](https://meow-meow.io/meowtext/)** No installation needed. The Kitty edition is below.
 
-Meowtext is a banner editor for the browser and Kitty on Linux. Both use the same Python compositor, effects, cell rasteriser and export engine. The browser carries the visual inventory into a full-width studio, with arrow-key previews and detailed controls one Enter away. First visits show measured download progress and recovery controls; other fonts load only when selected. The terminal edition uses FIGlet, TOIlet and TheDraw fonts; the browser bundles 569 FIGlet fonts through PyFIGlet and accepts imported TheDraw `.tdf` files. TOIlet rendering remains available in the Kitty edition.
+Meowtext is a banner editor for the browser and Kitty on Linux. Both use the same Python compositor, effects, cell rasteriser and export engine. The browser carries the visual inventory into a full-width studio, with arrow-key previews and detailed controls one Enter away. First visits show measured download progress and recovery controls; other fonts load only when selected. The browser includes 4,613 fonts and colour variants: 881 FIGlet, 24 TOIlet and 3,708 TheDraw. Collection filters and coloured specimens make all three visible; Browse all retains every indexed variant. You can also import your own TheDraw `.tdf` files. The Kitty edition discovers locally installed fonts.
 
 ![Meowtext browser inventory](docs/images/browser.png)
 
@@ -140,7 +140,7 @@ A saved library design contains both the editable recipe and a frozen copy of it
 
 ## Fonts and exports
 
-The Kitty edition discovers system FIGlet/TOIlet fonts and `~/.config/meowtext/fonts` automatically. TheDraw `.tdf` files are read directly; the existing `~/.config/tdfgo/fonts` directory is also recognised. `meowtext fonts --fetch` downloads the optional extra FIGlet collection. The browser's PyFIGlet fonts and DejaVu raster font are bundled with their licenses in `web/vendor`; other font packs retain their original terms.
+The Kitty edition discovers system FIGlet/TOIlet fonts and `~/.config/meowtext/fonts` automatically. TheDraw `.tdf` files are read directly; the existing `~/.config/tdfgo/fonts` directory is also recognised. `meowtext fonts --fetch` downloads the optional extra FIGlet collection. The browser's pinned public collections, source revisions, checksums and original notices live in `web/vendor`. See [font credits](web/vendor/Font-credits.txt). Fonts load individually as needed, including fonts used by desktop projects; custom imported files stay on your device.
 
 Exports include HTML5 colour cycling, animated GIF, Kitty and APNG, PNG stills, ANSI, text, JSON cell data, Kitty graphics, IRC, Markdown and editable `.meowtext` projects. PNG and Kitty previews use DejaVu Sans Mono with geometric block, shade and box-drawing cells.
 

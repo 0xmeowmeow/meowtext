@@ -147,6 +147,23 @@ OUTLINE_MODES: tuple[tuple[str, str], ...] = (
     ("Blocks", "blocks"),
 )
 
+# Partial styles: choosing a shadow must retain the current fill and border.
+SHADOW_STYLES = {
+    "shadow-off": ("No shadow", {"shadow": False}),
+    "shadow-drop": ("Drop shadow", {"shadow": True, "shadow_dx": 1, "shadow_dy": 1,
+                                    "shadow_color": Color(105, 121, 151), "shadow_char": None}),
+    "shadow-offset": ("Offset shadow", {"shadow": True, "shadow_dx": 3, "shadow_dy": 2,
+                                        "shadow_color": Color(105, 121, 151), "shadow_char": None}),
+    "shadow-left": ("Left shadow", {"shadow": True, "shadow_dx": -2, "shadow_dy": 1,
+                                    "shadow_color": Color(105, 121, 151), "shadow_char": None}),
+    "shadow-raised": ("Raised shadow", {"shadow": True, "shadow_dx": 1, "shadow_dy": -1,
+                                        "shadow_color": Color(105, 121, 151), "shadow_char": None}),
+    "shadow-block": ("Block shadow", {"shadow": True, "shadow_dx": 2, "shadow_dy": 1,
+                                      "shadow_color": Color(105, 121, 151), "shadow_char": "█"}),
+    "shadow-dotted": ("Dotted shadow", {"shadow": True, "shadow_dx": 2, "shadow_dy": 1,
+                                        "shadow_color": Color(105, 121, 151), "shadow_char": "░"}),
+}
+
 ANIMATIONS: tuple[tuple[str, str], ...] = (
     ("None", "none"),
     ("Hue cycle", "hue"),

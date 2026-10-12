@@ -1,0 +1,20 @@
+{
+  "archive": "catalogue-fonts.zip",
+  "sha256": "9b9efa3f5786a6a313260e1c4aa0e7817adf00b1dfaba79e6c7b666b5f84943d",
+  "sources": [
+    {
+      "name": "tdfiglet",
+      "url": "https://github.com/tat3r/tdfiglet",
+      "revision": "0225b8881d06773b92d9db2c7881f03ff0bdece7",
+      "files": 1198,
+      "note": "Includes fonts/ and unused-fonts/; Meowtext supports colour, block and outline fonts. Filename extensions normalised to uppercase; contents unchanged."
+    },
+    {
+      "name": "xero/figlet-fonts",
+      "url": "https://github.com/xero/figlet-fonts",
+      "revision": "417429ef36ab039cbf192a4424c60aa23fc32de8",
+      "files": 400,
+      "note": "Only .flf and .tlf font data; embedded authorship and redistribution notices preserved."
+    }
+  ]
+}

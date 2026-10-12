@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="description" content="Lettering with character. Compare hundreds of fonts, try real ANSI effects, animate, and keep what you made. A Meowtext studio in your browser.">
+<meta name="description" content="Lettering with character. Compare thousands of FIGlet, TOIlet and TheDraw fonts, try real ANSI effects, animate, and keep what you made.">
 <meta name="theme-color" content="#091017">
 <title>Meowtext — lettering with character</title>
 <link rel="stylesheet" href="style.css?v=BUILD_ID">
@@ -34,6 +34,7 @@
 <div class="workspace">
 <section id="fonts-panel" class="panel" hidden aria-label="Compare fonts">
 <div class="section-tools"><label><span>Find a shape</span><input id="search" type="search" placeholder="gothic, script, thin lines…" disabled></label><button id="back" disabled>← Back</button><button id="more" disabled>Another set →</button><button id="browse" disabled>Browse all</button><button id="import-font" disabled>Import .tdf</button></div>
+<div id="font-engines" class="font-engines" role="group" aria-label="Font collections"></div>
 <div id="font-grid" class="font-grid inventory" aria-label="Font comparisons"></div>
 <div class="panel-foot"><span id="font-count">Follow a shape you like. Keep a way back.</span><button id="similar" disabled>↵ More like this</button><button class="primary" data-tab="decorate">Use this font →</button></div>
 </section>
@@ -58,7 +59,7 @@
 </main>
 <footer><span id="key-hint"><b>↑ ↓ ← →</b> try a specimen <b>Tab</b> next inventory <b>Enter</b> tune <b>Alt Z</b> undo</span><span><button id="ui-motion">Pause samples</button> <a href="https://github.com/0xmeowmeow/meowtext">GitHub / Kitty edition ↗</a> <a href="/">meow-meow.io ↗</a></span></footer>
 <dialog id="full-size"><form method="dialog"><h2>Full size · scroll to inspect</h2><button class="close">Close ×</button></form><div class="full-scroll"><img id="full-art" alt="Artwork at native resolution"></div></dialog>
-<dialog id="shortcuts"><form method="dialog"><h2>Make it yours</h2><button class="close">Esc · Close ×</button></form><p>Click a specimen to apply it. Arrows immediately try its neighbours. Each inventory is one Tab stop.</p><dl class="shortcuts"><dt>Alt 1 / 2 / 3</dt><dd>Fonts / Decorate / Save & use</dd><dt>Alt T</dt><dd>Edit your words</dd><dt>Arrows · Home · End</dt><dd>Try specimens in the focused inventory</dd><dt>Enter</dt><dd>Explore a font’s neighbours, or tune an effect</dd><dt>Tab / Shift Tab</dt><dd>Move between effect inventories</dd><dt>Alt P</dt><dd>Pause or play your artwork</dd><dt>Alt Z</dt><dd>Undo your last change</dd><dt>Escape</dt><dd>Close details, return to the specimen</dd></dl><p>No account. No upload of your words. Save projects to keep editable copies.</p><p class="small">Built on <a href="PyFIGlet-LICENSE.txt">PyFIGlet</a>, <a href="DejaVu-LICENSE.txt">DejaVu</a> and <a href="pyodide/LICENSE">Pyodide</a>.</p></dialog>
+<dialog id="shortcuts"><form method="dialog"><h2>Make it yours</h2><button class="close">Esc · Close ×</button></form><p>Click a specimen to apply it. Arrows immediately try its neighbours. Each inventory is one Tab stop.</p><dl class="shortcuts"><dt>Alt 1 / 2 / 3</dt><dd>Fonts / Decorate / Save & use</dd><dt>Alt T</dt><dd>Edit your words</dd><dt>Arrows · Home · End</dt><dd>Try specimens in the focused inventory</dd><dt>Enter</dt><dd>Explore a font’s neighbours, or tune an effect</dd><dt>Tab / Shift Tab</dt><dd>Move between effect inventories</dd><dt>Alt P</dt><dd>Pause or play your artwork</dd><dt>Alt Z</dt><dd>Undo your last change</dd><dt>Escape</dt><dd>Close details, return to the specimen</dd></dl><p>No account. No upload of your words. Save projects to keep editable copies.</p><p class="small">Built on <a href="PyFIGlet-LICENSE.txt">PyFIGlet</a>, <a href="DejaVu-LICENSE.txt">DejaVu</a> and <a href="pyodide/LICENSE">Pyodide</a>. Font collections and original authors: <a href="Font-credits.txt">credits</a>.</p></dialog>
 <input type="file" id="project-file" accept=".meowtext,application/json" hidden><input type="file" id="font-file" accept=".tdf" hidden>
 <noscript>This editor needs JavaScript. The <a href="https://github.com/0xmeowmeow/meowtext">Kitty edition</a> also runs locally on Linux.</noscript>
 <!-- BOOTSTRAP -->

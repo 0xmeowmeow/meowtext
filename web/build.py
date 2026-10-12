@@ -9,6 +9,8 @@ import sys
 import tempfile
 import zipfile
 import gzip
+import os
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -42,6 +44,16 @@ with tempfile.TemporaryDirectory(prefix="meowtext-web-") as temp:
     headings = json.loads((WEB / "lettering.json").read_text())
     with zipfile.ZipFile(WEB / "vendor/pyfiglet-1.0.4-py3-none-any.whl") as wheel:
         wheel.extractall(temp)
+    font_pack = json.loads((WEB / "vendor/catalogue-fonts.json").read_text())
+    pack_path = WEB / "vendor" / font_pack["archive"]
+    if hashlib.sha256(pack_path.read_bytes()).hexdigest() != font_pack["sha256"]:
+        raise SystemExit("Font collection checksum mismatch")
+    with zipfile.ZipFile(pack_path) as pack:
+        for name in pack.namelist():
+            # Keep the working wheel's version when the collections overlap.
+            if not (Path(temp) / name).exists():
+                pack.extract(name, temp)
+    os.chdir(temp)
     sys.path.insert(0, temp)
     spec = importlib.util.spec_from_file_location("web_bridge", WEB / "bridge.py")
     bridge = importlib.util.module_from_spec(spec)
@@ -50,13 +62,13 @@ with tempfile.TemporaryDirectory(prefix="meowtext-web-") as temp:
     from meowtext.discovery import describe, Specimen
     from meowtext.catalog import FontInfo
     from meowtext.compose import layout_font, present
-    from meowtext.effects import Animation, BannerStyle, PRESETS, OUTLINE_MODES, ANIMATIONS
+    from meowtext.effects import Animation, BannerStyle, PRESETS, OUTLINE_MODES, ANIMATIONS, SHADOW_STYLES
     from meowtext.export import to_png
     from meowtext.animation_export import export_design
     from meowtext.project import Project
 
     index = []
-    for font in list_fonts("figlet"):
+    for font in [*list_fonts("figlet"), *list_fonts("toilet"), *list_fonts("tdf")]:
         try:
             item = describe(render(font, "MEOW").grid, font)
             index.append(dataclasses.asdict(item))
@@ -80,6 +92,8 @@ with tempfile.TemporaryDirectory(prefix="meowtext-web-") as temp:
     for _, mode in (("Off", "off"), *OUTLINE_MODES):
         style = BannerStyle(gradient="ice", outline=mode != "off", outline_mode=mode)
         specimen_png(assets / f"edge-{mode}.png", present(sample, style))
+    for key, (_, settings) in SHADOW_STYLES.items():
+        specimen_png(assets / f"edge-{key}.png", present(sample, BannerStyle(gradient="ice", **settings)))
     for _, name in ANIMATIONS:
         style = PRESETS["rainbow"].clone()
         style.outline, style.outline_mode, style.outline_scope = True, "contour", "letter"
@@ -119,27 +133,28 @@ with tempfile.TemporaryDirectory(prefix="meowtext-web-") as temp:
                "effects", "errors", "export", "grid", "library", "packs", "palette", "project", "raster")
     items = [Specimen(FontInfo(**i["font"]), tuple(i["features"]), tuple(i["categories"])) for i in index]
     bootstrap = bridge.configuration(items)
-    starter_fonts = {bridge.project.font_name, *(c["name"] for c in bootstrap["choices"])}
-    bootstrap["specimens"] = {c["name"]: bridge.handle({"action":"specimen", "font":{k:c[k] for k in ("name","engine","source","index")}, "text":bridge.project.text}) for c in bootstrap["choices"]}
+    starter_fonts = {resolve(bridge.project.engine, bridge.project.font_name).source, *(c["source"] for c in bootstrap["choices"])}
+    bootstrap["specimens"] = {f'{c["engine"]}\x1f{c["source"]}\x1f{c["index"]}': bridge.handle({"action":"specimen", "font":{k:c[k] for k in ("name","engine","source","index")}, "text":bridge.project.text}) for c in bootstrap["choices"]}
     # The full catalogue remains available; downloading hundreds of unselected
     # fonts must not block the first edit.
     font_files = {}
     font_dir = DIST / "fonts"
     font_dir.mkdir(exist_ok=True)
-    for path in (Path(temp) / "pyfiglet/fonts").iterdir():
-        if path.suffix not in {".flf", ".tlf"}:
+    for path in Path(temp).rglob("*"):
+        if path.suffix.lower() not in {".flf", ".tlf", ".tdf"}:
             continue
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
-        target = font_dir / f"{digest}-{path.name}"
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        target = font_dir / f"{digest[:12]}-{path.name}"
         shutil.copy2(path, target)
-        font_files[path.stem] = {"file":path.name, "url":f"fonts/{target.name}"}
+        key = {".flf":"figlet:", ".tlf":"toilet:", ".tdf":"tdf:"}[path.suffix.lower()] + (path.name.lower() if path.suffix.lower() == ".tdf" else path.stem)
+        font_files[key] = {"path":str(path.relative_to(temp)), "url":f"fonts/{quote(target.name)}", "sha256":digest}
     with zipfile.ZipFile(DIST / "runtime.zip", "w", zipfile.ZIP_DEFLATED) as archive:
         for module in modules:
             archive.write(ROOT / "meowtext" / f"{module}.py", f"meowtext/{module}.py")
         for path in (ROOT / "meowtext/engines").glob("*.py"):
             archive.write(path, f"meowtext/engines/{path.name}")
         for path in Path(temp).rglob("*"):
-            if path.suffix in {".flf", ".tlf"} and path.stem not in starter_fonts:
+            if path.suffix.lower() in {".flf", ".tlf", ".tdf"} and str(path.relative_to(temp)) not in starter_fonts:
                 continue
             if path.is_file() and "__pycache__" not in path.parts:
                 archive.write(path, path.relative_to(temp))
@@ -165,6 +180,7 @@ with tempfile.TemporaryDirectory(prefix="meowtext-web-") as temp:
     sub = subset.Subsetter(options=options)
     sub.populate(unicodes=list(range(32, 256)) + [0x2190,0x2191,0x2192,0x2193,0x21b5,0x21b6,0x21ba,0x25b6,0x25b8,0x25c6,0x2161])
     sub.subset(font); font.flavor = "woff2"; font.save(DIST / "studio-mono.woff2")
+    os.chdir(ROOT)
 
 for name in ("index.html", "app.js", "worker.js", "style.css", ".htaccess"):
     shutil.copy2(WEB / name, DIST / name)
@@ -181,6 +197,6 @@ for path in [*runtime_dir.glob("*.wasm"), *runtime_dir.glob("*.mjs"), *runtime_d
     compressed = path.with_name(path.name + ".br")
     if not compressed.exists() or compressed.stat().st_mtime < path.stat().st_mtime:
         compressed.write_bytes(brotli.compress(path.read_bytes(), quality=11))
-for path in (WEB / "vendor").glob("*LICENSE.txt"):
+for path in [*(WEB / "vendor").glob("*LICENSE.txt"), WEB / "vendor/Font-credits.txt"]:
     shutil.copy2(path, DIST / path.name)
 print(f"Built {len(index)} fonts and shared renderer in {DIST}")
