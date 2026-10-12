@@ -77,6 +77,11 @@ class ConcurrentTraceTests(unittest.TestCase):
             plan = timeline(complete, motion)
             self.assertTrue(plan.loop)
             self.assertEqual(plan.count % 2, 0)
+            self.assertEqual(plan.step, 1)
+            self.assertEqual(plan.duration, 120)
+            # The actual editor advances integer frames, not export subframes.
+            self.assertEqual(present(source, style, animation=motion,
+                                     frame=math.ceil(7 / speed)), complete)
             self.assertEqual(present(source, style, animation=motion,
                                      frame=(plan.count // 2) * plan.step), complete)
             self.assertEqual(present(source, style, animation=motion, frame=plan.count * plan.step),

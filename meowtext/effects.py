@@ -1081,6 +1081,10 @@ class TracePlan:
     paths: tuple[tuple[tuple[int, int], ...], ...]
     steps: int
 
+    def turnaround(self, speed: float) -> int:
+        # A whole preview tick at the endpoint, even when speed skips cells.
+        return max(1, math.ceil((self.steps - 1) / speed))
+
 
 def trace_plan(grid: Grid, pattern: str = "outline") -> TracePlan:
     """One path per letter, plus enough decoration seeds to keep pace.
@@ -1118,11 +1122,12 @@ def trace(grid: Grid, animation: Animation, frame: float) -> Grid:
     plan = trace_plan(grid, animation.pattern)
     if not plan.paths:
         return grid.copy()
-    clock = frame * (animation.speed if animation.speed > 0 else 1.0)
+    speed = animation.speed if animation.speed > 0 else 1.0
+    clock = frame * speed
     if animation.direction == "pingpong":
-        span = max(1, plan.steps - 1)
-        position = clock % (2 * span)
-        clock = min(position, 2 * span - position)
+        turn = plan.turnaround(speed)
+        position = frame % (2 * turn)
+        clock = min(plan.steps - 1, min(position, 2 * turn - position) * speed)
     if animation.reveal == "runner":
         if animation.direction == "backward":
             clock = -clock

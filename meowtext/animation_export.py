@@ -44,14 +44,14 @@ def timeline(grid, motion, outline_speed=1.0):
     speed = motion.speed if motion.speed > 0 else 1
     loop = True
     if name == "trace":
-        steps = trace_plan(grid, motion.pattern).steps
+        trace = trace_plan(grid, motion.pattern)
+        steps = trace.steps
         if motion.direction == "pingpong":
-            # Sample the turnaround exactly, including at fractional speeds.
-            period = 2 * max(1, steps - 1) / speed
-            count = 2 * max(1, math.ceil(period / 2))
+            # Use the preview's whole ticks, including the complete turnaround.
+            count = 2 * trace.turnaround(speed)
             if count > MAX_FRAMES:
                 raise RenderError("This animation cycle exceeds 720 frames. Increase motion speed before exporting animation.")
-            return Timeline(count, period / count, FRAME_MS * period / count, True)
+            return Timeline(count, 1, FRAME_MS, True)
         if motion.reveal == "runner":
             period = steps / speed
         else:
