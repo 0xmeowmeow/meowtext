@@ -7,6 +7,7 @@ let requestId = 0, pending = new Map(), project, config, revision = 0, goodProje
 let frame = 0, playing = !matchMedia('(prefers-reduced-motion: reduce)').matches, busyFrame = false, ready = false, valid = false;
 let lastTick = performance.now(), choices = [], browse = false, page = 0, selected = 0, history = [], painting = false;
 let paintChar = '█', paintColor = '#65e8ed', filenameOwned = false, width = 0, height = 0;
+let tuneKind = null, tuneReturn = null, tuneTimer = null, tunePending = false, tuneRendering = false;
 const clone = value => JSON.parse(JSON.stringify(value));
 function status(message, error = false) { $('status').textContent = message; $('status').classList.toggle('error', error); }
 function createWorker(retry = false) {
@@ -100,7 +101,7 @@ async function commit({reset = true} = {}) {
     width = result.width; height = result.height;
     $('dimensions').textContent = `${width} × ${height} CELLS / ${project.engine.toUpperCase()}`;
     valid = true; $('download').disabled = false; syncControls();
-    status('Arrow keys try nearby specimens · Enter opens their details.');
+    status(tuneKind ? 'Preview updated · Esc returns to specimens · Alt Z undoes your adjustment.' : 'Arrow keys try nearby specimens · Enter opens their details.');
     $('draft-state').textContent = 'DRAFT SAVED LOCALLY';
     try { localStorage.setItem('meowtext-project-v1', JSON.stringify(project)); } catch (_) { $('draft-state').textContent='SAVE A PROJECT TO KEEP IT'; }
     await notice(); return true;
@@ -156,7 +157,7 @@ function effectBank(id, values, kind, asset, callback) {
     const button = document.createElement('button'); button.className = 'effect'; button.dataset.value = value; button.disabled = !ready; button.setAttribute('aria-pressed','false');
     const img = document.createElement('img'); img.src = `assets/${asset}-${value}.png`; img.alt = ''; img.loading = 'lazy';
     const text = document.createElement('span'); text.textContent = title(label); button.append(img,text);
-    button.onclick = () => { if (!ready) return; remember(); callback(value); document.querySelectorAll(`#${id} button`).forEach(b => b.setAttribute('aria-pressed', String(b === button))); commit(); };
+    button.onclick = () => { if (!ready) return; closeTune(false); remember(); callback(value); document.querySelectorAll(`#${id} button`).forEach(b => b.setAttribute('aria-pressed', String(b === button))); commit(); };
     button.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); tune(kind); } };
     $(id).append(button);
   }
@@ -173,6 +174,7 @@ document.addEventListener('keydown', event => {
   next.focus({preventScroll:true}); next.scrollIntoView({block:'nearest',inline:'nearest'}); next.click(); roving(grid);
 });
 function tab(name) {
+  if (name !== 'decorate') closeTune(false);
   activeTab = name;
   document.querySelectorAll('.workspace>.panel').forEach(p => p.hidden = p.id !== name + '-panel');
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tab === name)));
@@ -180,7 +182,49 @@ function tab(name) {
   $('stage-hint').textContent = {fonts:'Compare the shapes. Follow the one you like.',decorate:'Choose a specimen. See it here.',export:'The preview is the artwork you take with you.'}[name];
 }
 document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => tab(b.dataset.tab));
-document.querySelectorAll('[data-tune]').forEach(b => b.onclick = () => tune(b.dataset.tune));
+document.querySelectorAll('[data-tune]').forEach(b => {
+  b.onclick = () => tune(b.dataset.tune);
+  b.setAttribute('aria-controls','tune'); b.setAttribute('aria-expanded','false');
+});
+function closeTune(restoreFocus = true) {
+  if ($('tune').hidden) return;
+  $('tune').hidden = true; document.body.classList.remove('tuning');
+  $('decorate-panel').scrollTop = 0;
+  document.querySelectorAll('[data-tune]').forEach(b => b.setAttribute('aria-expanded','false'));
+  tuneKind = null;
+  if (restoreFocus && tuneReturn?.isConnected) tuneReturn.focus();
+}
+$('close-tune').onclick = () => closeTune();
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !$('tune').hidden && !document.querySelector('dialog[open]')) {
+    event.preventDefault(); closeTune();
+  }
+});
+function scheduleTune() {
+  // Invalidate any older response immediately so it cannot replace newer edits.
+  revision++; valid = false; $('download').disabled = true; tunePending = true;
+  if (!tuneTimer && !tuneRendering) tuneTimer = setTimeout(renderTune, 60);
+}
+async function renderTune() {
+  tuneTimer = null; tunePending = false; tuneRendering = true;
+  try { await commit(); }
+  finally {
+    tuneRendering = false;
+    if (tunePending) tuneTimer = setTimeout(renderTune, 60);
+  }
+}
+function liveControl(input, apply) {
+  let remembered = false, previous = input.type === 'checkbox' ? input.checked : input.value;
+  function update() {
+    const value = input.type === 'checkbox' ? input.checked : input.value;
+    if (value === previous || !input.validity.valid || (input.type === 'number' && value === '')) return;
+    if (!remembered) { remember(); remembered = true; }
+    previous = value; apply(value); scheduleTune();
+  }
+  input.oninput = update;
+  input.onchange = () => { update(); remembered = false; };
+  input.onblur = () => { remembered = false; };
+}
 function field(label, key, type = 'text', options, group = 'style') {
   const wrap = document.createElement('label'); wrap.append(document.createTextNode(label));
   wrap.dataset.field = key;
@@ -192,8 +236,8 @@ function field(label, key, type = 'text', options, group = 'style') {
   if (type === 'number') { input.step = 'any'; }
   if (type === 'checkbox') input.checked = !!obj[key];
   else input.value = Array.isArray(obj[key]) ? obj[key].join(',') : obj[key] ?? '';
-  input.onchange = () => {
-    remember(); let value = type === 'checkbox' ? input.checked : type === 'number' ? Number(input.value) : input.value;
+  liveControl(input, raw => {
+    let value = type === 'number' ? Number(raw) : raw;
     if (['stops','outline_stops'].includes(key)) value = value.trim() ? value.split(',').map(x => x.trim()) : null;
     if (['gradient','outline_gradient'].includes(key) && value === '') value = null;
     const target=group ? project[group] : project; target[key]=value;
@@ -203,8 +247,7 @@ function field(label, key, type = 'text', options, group = 'style') {
     if(key==='outline_stops'&&value)target.outline_gradient=null;
     if (group==='animation' && key==='name') playing = value!=='none' && samplesMoving;
     if (group==='animation' && key==='name') motionFields();
-    commit();
-  };
+  });
   wrap.append(input); $('tune-controls').append(wrap);
 }
 const directions = ['horizontal','horizontal-back','vertical','vertical-back','diagonal','diagonal-back'];
@@ -215,13 +258,16 @@ function motionFields() {
     field.hidden=['travel','layers'].includes(key)?!['hue','march'].includes(name):['pattern','reveal'].includes(key)?name!=='trace':false;
   }
 }
-function tune(kind) {
+function tune(kind, {focus = true} = {}) {
   if (!ready) return;
+  if (activeTab !== 'decorate') tab('decorate');
+  if (focus) tuneReturn = document.activeElement;
+  tuneKind = kind;
   $('tune-controls').replaceChildren(); $('tune-title').textContent = {look:'Tune the look',edge:'Tune the edges',motion:'Tune the motion',paint:'Paint cells'}[kind];
   const palettes = ['', ...config.palettes];
   if (kind === 'look') {
     const solidLabel=document.createElement('label');solidLabel.textContent='Solid colour';
-    const solid=document.createElement('input');solid.type='color';solid.value=project.style.stops?.[0]||'#65e8ed';solid.onchange=()=>{remember();project.style.gradient=null;project.style.stops=[solid.value,solid.value];commit();};solidLabel.append(solid);$('tune-controls').append(solidLabel);
+    const solid=document.createElement('input');solid.type='color';solid.value=project.style.stops?.[0]||'#65e8ed';liveControl(solid,value=>{project.style.gradient=null;project.style.stops=[value,value];});solidLabel.append(solid);$('tune-controls').append(solidLabel);
     field('Palette','gradient','text',palettes); field('Custom colours · comma-separated #hex','stops');
     field('Lift dark gradients','readable_gradients','checkbox');
     field('Gradient direction','direction','text',directions); field('Hard colour bands','bands','checkbox');
@@ -230,7 +276,7 @@ function tune(kind) {
     for (const [slot, role] of Object.entries(project.roles || {})) {
       const label = document.createElement('label'); label.textContent = `Role ${slot} · ${role.name}`;
       const color = document.createElement('input'); color.type = 'color'; color.value = role.base;
-      color.onchange = () => { remember(); project.roles[slot] = {...role, base:color.value, linked:true}; commit(); };
+      liveControl(color, value => { project.roles[slot] = {...project.roles[slot], base:value, linked:true}; });
       label.append(color); $('tune-controls').append(label);
     }
   } else if (kind === 'edge') {
@@ -251,12 +297,20 @@ function tune(kind) {
     motionFields();
     const p = document.createElement('p'); p.textContent = 'Shimmer sweeps light across the letters; Ripple sends it out from the centre; Breathe adds a slow glow; Colour wave rolls hues across the word. These four affect the letters. Trace starts every letter together, with enough border and shadow starting points to finish alongside them. Draw finishes and holds; ping-pong draws completely before reversing. Other motions repeat.'; $('tune-controls').append(p);
   } else {
-    const p = document.createElement('p'); p.textContent = 'Choose a character and colour, close this panel, then click cells in the artwork. Painting pauses playback. Undo reverses each stroke.'; $('tune-controls').append(p);
+    const p = document.createElement('p'); p.textContent = 'Choose a character and colour, then click cells in the artwork above. Painting pauses playback. Undo reverses each stroke.'; $('tune-controls').append(p);
     for (const [name,type,value,fn] of [['Character','text',paintChar,v=>paintChar=[...v][0]||' '],['Colour','color',paintColor,v=>paintColor=v]]) {
       const label = document.createElement('label'); label.textContent=name; const input=document.createElement('input'); input.type=type; input.value=value; input.oninput=()=>fn(input.value); label.append(input); $('tune-controls').append(label);
     }
   }
-  $('tune').showModal();
+  $('tune').hidden = false; document.body.classList.add('tuning');
+  document.querySelectorAll('[data-tune]').forEach(b => {
+    b.setAttribute('aria-controls','tune'); b.setAttribute('aria-expanded',String(b.dataset.tune === kind));
+  });
+  if (focus) {
+    $('decorate-panel').scrollTop = 0;
+    $('tune-controls').querySelector('input,select,textarea')?.focus({preventScroll:true});
+    if (matchMedia('(max-width:900px)').matches) $('tune').scrollIntoView({block:'start'});
+  }
 }
 function downloadBytes(bytes, name, type) {
   const url = URL.createObjectURL(new Blob([bytes], {type})); const a = document.createElement('a'); a.href=url; a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(url),30000);
@@ -281,11 +335,11 @@ $('words').oninput = () => { if (!ready) return; clearTimeout(wordTimer); wordTi
 $('search').oninput = () => { clearTimeout(searchTimer); searchTimer=setTimeout(()=>compare('reset'),200); };
 $('more').onclick = () => compare('more'); $('back').onclick = () => compare('back'); $('similar').onclick = () => compare('narrow');
 $('browse').onclick = () => { browse=!browse; compare('reset'); };
-$('undo').onclick = () => { if(history.length){project=history.pop(); $('words').value=project.text; commit().then(()=>gallery());} };
+$('undo').onclick = () => { if(history.length){project=history.pop(); $('words').value=project.text; if(tuneKind)tune(tuneKind,{focus:false}); commit().then(()=>gallery());} };
 $('pause').onclick = () => { playing=!playing; lastTick=performance.now(); syncControls(); };
 $('restart').onclick = () => { frame=0; playing=true; commit(); };
 $('inspect').onclick = () => { $('full-art').src=$('art').src; $('full-size').showModal(); };
-$('paint').onclick = () => { painting=!painting; $('art').classList.toggle('painting',painting); $('paint').textContent=painting?'Finish painting':'Paint cells'; if(painting){playing=false;syncControls();tune('paint');} };
+$('paint').onclick = () => { painting=!painting; $('art').classList.toggle('painting',painting); $('paint').textContent=painting?'Finish painting':'Paint cells'; if(painting){playing=false;syncControls();tune('paint');}else if(tuneKind==='paint')closeTune(false); };
 $('art').onclick = event => {
   if(!painting||!valid) return;
   const bounds=$('art').getBoundingClientRect(), x=Math.min(width-1,Math.floor((event.clientX-bounds.left)/bounds.width*width)), y=Math.min(height-1,Math.floor((event.clientY-bounds.top)/bounds.height*height));

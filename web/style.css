@@ -19,3 +19,30 @@ dialog{background:#122530;color:var(--ink);border:2px solid var(--lime);width:mi
 .brand img,.bank-heading h2 img,.export-primary h2 img,.font-card img,.effect img{image-rendering:auto}
 
 #art{image-rendering:auto}
+
+/* Tuning stays between the artwork and the specimen banks. */
+body.tuning #decorate-panel{overflow-y:auto;scrollbar-color:#547783 #11232e;scrollbar-gutter:stable;padding-right:4px}
+body.tuning .banks{flex:none;min-height:340px;height:45vh}
+.tune-panel{flex:none;min-width:0;background:var(--panel);border:2px solid var(--lime);padding:14px 16px;margin-bottom:10px}
+.tune-heading{display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--line);padding-bottom:10px}
+.tune-heading h2{color:var(--lime);margin:0;font-size:17px}
+.tune-heading>span{color:var(--muted);font-size:11px}
+.tune-heading button{margin-left:auto;font-size:11px;background:#2c4650}
+.tune-panel .tune-controls{grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px 16px;margin-top:14px}
+.tune-controls>label{min-width:0}
+.tune-controls input,.tune-controls select,.tune-controls textarea{width:100%}
+.tune-controls>p{color:var(--muted);margin:0;line-height:1.6}
+@media(max-width:900px){
+ body.tuning .stage{position:sticky;top:0;z-index:5;height:min(220px,30dvh);min-height:130px}
+ body.tuning #decorate-panel{overflow:visible;padding-right:0}
+ body.tuning .banks{height:auto;min-height:0}
+ .tune-panel{scroll-margin-top:calc(min(220px,30dvh) + 12px)}
+ .tune-heading{flex-wrap:wrap;gap:8px}
+ .tune-heading>span{order:3;flex-basis:100%}
+}
+@media(max-width:460px){
+ .tune-panel{padding:12px}
+ .tune-panel .tune-controls{grid-template-columns:1fr}
+ .tune-heading h2{font-size:14px}
+ .tune-heading button{font-size:10px;padding:6px}
+}

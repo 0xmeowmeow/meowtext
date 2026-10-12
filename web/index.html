@@ -38,6 +38,10 @@
 <div class="panel-foot"><span id="font-count">Follow a shape you like. Keep a way back.</span><button id="similar" disabled>↵ More like this</button><button class="primary" data-tab="decorate">Use this font →</button></div>
 </section>
 <section id="decorate-panel" class="panel" aria-label="Decorate your artwork">
+<section id="tune" class="tune-panel" aria-labelledby="tune-title" hidden>
+<div class="tune-heading"><h2 id="tune-title">Tune</h2><span>Changes preview as you edit</span><button id="close-tune" aria-label="Close settings">Esc · Back to specimens ×</button></div>
+<div id="tune-controls" class="tune-controls"></div>
+</section>
 <div class="banks">
 <section class="bank" data-bank="look"><div class="bank-heading"><h2><img src="assets/heading-looks.png" alt="Looks"></h2><span>01</span></div><p class="bank-readout" id="look-readout">◆ Cyan <span>arrows try · ↵ tune</span></p><div id="looks" class="effect-grid inventory" aria-label="Looks"></div><button class="tune-button" data-tune="look">↵ Tune look <span>Tab → edges</span></button></section>
 <section class="bank" data-bank="edge"><div class="bank-heading"><h2><img src="assets/heading-edges.png" alt="Edges"></h2><span>02</span></div><p class="bank-readout" id="edge-readout">◆ No border <span>arrows try · ↵ tune</span></p><div id="edges" class="effect-grid inventory" aria-label="Edges"></div><button class="tune-button" data-tune="edge">↵ Tune edges <span>Tab → motion</span></button></section>
@@ -53,7 +57,6 @@
 </div>
 </main>
 <footer><span id="key-hint"><b>↑ ↓ ← →</b> try a specimen <b>Tab</b> next inventory <b>Enter</b> tune <b>Alt Z</b> undo</span><span><button id="ui-motion">Pause samples</button> <a href="https://github.com/0xmeowmeow/meowtext">GitHub / Kitty edition ↗</a> <a href="/">meow-meow.io ↗</a></span></footer>
-<dialog id="tune"><form method="dialog"><h2 id="tune-title">Tune</h2><button class="close" aria-label="Close settings">Esc · Back to specimens ×</button></form><div id="tune-controls" class="tune-controls"></div></dialog>
 <dialog id="full-size"><form method="dialog"><h2>Full size · scroll to inspect</h2><button class="close">Close ×</button></form><div class="full-scroll"><img id="full-art" alt="Artwork at native resolution"></div></dialog>
 <dialog id="shortcuts"><form method="dialog"><h2>Make it yours</h2><button class="close">Esc · Close ×</button></form><p>Click a specimen to apply it. Arrows immediately try its neighbours. Each inventory is one Tab stop.</p><dl class="shortcuts"><dt>Alt 1 / 2 / 3</dt><dd>Fonts / Decorate / Save & use</dd><dt>Alt T</dt><dd>Edit your words</dd><dt>Arrows · Home · End</dt><dd>Try specimens in the focused inventory</dd><dt>Enter</dt><dd>Explore a font’s neighbours, or tune an effect</dd><dt>Tab / Shift Tab</dt><dd>Move between effect inventories</dd><dt>Alt P</dt><dd>Pause or play your artwork</dd><dt>Alt Z</dt><dd>Undo your last change</dd><dt>Escape</dt><dd>Close details, return to the specimen</dd></dl><p>No account. No upload of your words. Save projects to keep editable copies.</p><p class="small">Built on <a href="PyFIGlet-LICENSE.txt">PyFIGlet</a>, <a href="DejaVu-LICENSE.txt">DejaVu</a> and <a href="pyodide/LICENSE">Pyodide</a>.</p></dialog>
 <input type="file" id="project-file" accept=".meowtext,application/json" hidden><input type="file" id="font-file" accept=".tdf" hidden>

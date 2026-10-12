@@ -2,6 +2,8 @@
 
 The browser studio carries the accepted Meowtext inventory into the web: a full-width artwork, three banks of real specimens, large comparison previews, immediate arrow-key selection and details one Enter away. Its headings and logo are rendered lettering. The desktop's approved design remains the source of this arrangement.
 
+Tune expands below the artwork and above the specimen banks. Controls preview changes as you type or adjust colours, without covering the artwork. Long settings scroll with the preview still visible, including on phones. Escape returns focus to the specimen or button that opened Tune; Undo restores both the artwork and open controls.
+
 A module worker runs the shared Python compositor, palette, discovery, rasteriser and exports through Pyodide 314.0.7. PyFIGlet replaces the desktop FIGlet subprocess. TheDraw imports use the same parser. TOIlet rendering, individual glyph editing and role splitting remain desktop controls; existing project patches, letter overrides, roles and notes survive browser project round trips.
 
 ## Build and serve

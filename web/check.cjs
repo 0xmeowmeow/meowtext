@@ -27,13 +27,38 @@ let browser;
   assert.equal(await page.locator('#font-name').innerText(),await page.locator('.font-card').nth(1).getAttribute('data-name'));
   await page.keyboard.press('Enter');await page.waitForTimeout(500);assert.equal(await page.locator('.font-card').count(),6);
   await page.keyboard.press('Alt+2');await page.click('#looks [data-value="cyan"]');await page.click('[data-tune="look"]');
-  assert.equal(await page.locator('#tune').evaluate(dialog=>dialog.open),true,`Tune must open: ${errors.join('; ')}`);
+  assert(await page.locator('#tune').isVisible(),`Tune must open: ${errors.join('; ')}`);
+  assert.equal(await page.locator('dialog[open]').count(),0,'Tune must leave the artwork accessible');
+  const artBox=await page.locator('.stage').boundingBox(),tuneBox=await page.locator('#tune').boundingBox(),banksBox=await page.locator('.banks').boundingBox();
+  assert(tuneBox.y>=artBox.y+artBox.height&&banksBox.y>=tuneBox.y+tuneBox.height,'Tune belongs below the artwork and above the banks');
   await page.getByLabel('Palette',{exact:true}).selectOption('fire');await page.waitForFunction(()=>valid&&project.style.gradient==='fire');
   assert.equal(await page.evaluate(()=>project.style.stops),null,'a previous solid must not override a chosen gradient');
   assert(await page.getByLabel('Lift dark gradients',{exact:true}).isChecked());
   await page.getByLabel('Lift dark gradients',{exact:true}).uncheck();await page.waitForFunction(()=>valid&&!project.style.readable_gradients);
   await page.getByLabel('Lift dark gradients',{exact:true}).check();await page.waitForFunction(()=>valid&&project.style.readable_gradients);
-  await page.keyboard.press('Escape');await page.click('#motions [data-value="hue"]');await page.waitForFunction(()=>valid);
+  if(await page.evaluate(()=>playing))await page.click('#pause');
+  const beforeTune=await page.locator('#art').getAttribute('src'),undoCount=await page.evaluate(()=>history.length);
+  const solid=page.getByLabel('Solid colour',{exact:true});await solid.focus();
+  for(const colour of ['#ea7592','#ecb860','#68d9c7']){
+    await solid.evaluate((input,value)=>{input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));},colour);
+    await page.waitForFunction(value=>valid&&project.style.stops?.[0]===value,colour);
+  }
+  assert.notEqual(await page.locator('#art').getAttribute('src'),beforeTune,'colour input previews without closing or blurring');
+  assert.equal(await solid.evaluate(input=>input===document.activeElement),true);
+  assert.equal(await page.evaluate(()=>history.length),undoCount+1,'a colour adjustment is one undo step');
+  // A renderer response arriving during a newer edit must not erase that edit.
+  await page.evaluate(()=>{window.originalRpc=rpc;rpc=async(action,values)=>{const result=await originalRpc(action,values);if(action==='set')await new Promise(resolve=>setTimeout(resolve,150));return result;};});
+  await solid.evaluate(input=>{input.value='#a4e075';input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await page.waitForTimeout(90);
+  await solid.evaluate(input=>{input.value='#d888ef';input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await page.waitForFunction(()=>valid&&project.style.stops?.[0]==='#d888ef');
+  await page.evaluate(()=>{rpc=originalRpc;delete window.originalRpc;});
+  await page.keyboard.press('Alt+z');await page.waitForFunction(()=>valid&&project.style.gradient==='fire'&&project.style.stops===null);
+  assert.equal(await page.getByLabel('Palette',{exact:true}).inputValue(),'fire','Undo also updates the open controls');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('#tune').isVisible(),false);
+  assert.equal(await page.locator('[data-tune="look"]').evaluate(e=>e===document.activeElement),true,'Escape restores the originating control');
+  await page.click('#motions [data-value="hue"]');await page.waitForFunction(()=>valid);
   await page.keyboard.press('Alt+p');const before=await page.locator('#art').getAttribute('src');
   await page.waitForTimeout(300);assert.equal(await page.locator('#art').getAttribute('src'),before);
   await page.keyboard.press('Alt+3');await page.selectOption('#format','png');
@@ -81,6 +106,16 @@ let browser;
   await page.click('[data-tune="motion"]');assert.equal(await page.getByLabel('Animated layers',{exact:true}).isVisible(),false);await page.keyboard.press('Escape');
   for(const width of [320,390,768,1024,1366,1920]){
     await page.setViewportSize({width,height:800});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`overflow at ${width}`);
+    await page.click('[data-tune="edge"]');
+    await page.getByLabel('Border enabled',{exact:true}).check();await page.waitForFunction(()=>valid&&project.style.outline);
+    await page.getByLabel('Distance from letters',{exact:true}).fill('4');await page.waitForFunction(()=>valid&&project.style.outline_distance===4);
+    assert.equal(await page.getByLabel('Distance from letters',{exact:true}).evaluate(e=>e===document.activeElement),true,'number inputs preview without blur');
+    await page.getByLabel('Shadow character · blank uses letters',{exact:true}).focus();
+    const visibleArt=await page.locator('.stage').boundingBox();
+    assert(visibleArt.y>=-1&&visibleArt.y+visibleArt.height<800,`artwork stays visible while tuning at ${width}px`);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`Tune overflow at ${width}`);
+    if(width===390||width===1366)await page.screenshot({path:`/tmp/meowtext-inline-tune-${width}.png`});
+    await page.keyboard.press('Escape');
   }
   assert.deepEqual(errors,[]);await context.close();
   const failure=await browser.newContext();let fail=true;
