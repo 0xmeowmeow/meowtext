@@ -1,21 +1,19 @@
-"""Lossless playback exports made by the same compositor as the editor.
+"""Complete playback exports made by the same compositor as the editor.
 
-HTML contains rendered frames, not browser-dependent approximations of ANSI
-glyphs. No fonts, network connection or installed Meowtext are needed to play it.
+HTML cycles colours on real text cells. APNG and Kitty retain lossless pixels;
+GIF shares a 256-colour palette. Each format uses the same animation timeline.
 """
 
 from __future__ import annotations
 
 import base64
-import html
-import json
 import math
 from dataclasses import dataclass
 from fractions import Fraction
 from io import BytesIO
 
 from meowtext.compose import present
-from meowtext.effects import Animation, _trace_order
+from meowtext.effects import Animation, LIGHT_MOTIONS, _trace_order
 from meowtext.errors import RenderError
 from meowtext.grid import Grid
 from meowtext.palette import RelationPalette
@@ -55,6 +53,8 @@ def timeline(grid, motion, outline_speed=1.0):
         if motion.layers in {"outline", "all"}:
             periods.append(base / (outline_speed if outline_speed > 0 else 1))
         period = _common_period(periods) / speed
+    elif name in LIGHT_MOTIONS:
+        period = LIGHT_MOTIONS[name] / speed
     elif name == "pulse":
         period = 5 * math.pi / speed
     elif name == "sparkle":
@@ -91,7 +91,7 @@ def export_design(source, project, fmt, frame=0, palette=None, progress=None):
                        frame=number, patches=project.patches)
 
     current = render(frame)
-    if fmt not in {"html", "apng", "kitty"} or project.animation.name == "none":
+    if fmt not in {"html", "apng", "gif", "kitty"} or project.animation.name == "none":
         return export(current, fmt)
     complete = render(0, Animation())
     plan = timeline(complete, project.animation, project.style.outline_speed)
@@ -99,26 +99,60 @@ def export_design(source, project, fmt, frame=0, palette=None, progress=None):
     from meowtext.raster import cell_size
     cw, ch = cell_size(18)
     pixels = max(1, complete.width * cw) * max(1, complete.height * ch)
-    if pixels * plan.count > (60_000_000 if fmt == "apng" else 240_000_000):
+    if pixels * plan.count > (60_000_000 if fmt in {"apng", "gif"} else 240_000_000):
         raise RenderError("This animation is too large to export at full fidelity. Shorten the text or increase motion speed, or choose a PNG still.")
-    if fmt in {"html", "kitty"}:
+    if fmt == "html":
+        frames = []
+        for i in range(plan.count):
+            frames.append(render(i * plan.step))
+            if progress:
+                progress(i + 1, plan.count)
+        return html_player(frames, complete, plan)
+    if fmt == "kitty":
         frames = []
         for i in range(plan.count):
             frames.append(to_png(render(i * plan.step)))
             if progress:
                 progress(i + 1, plan.count)
-        if fmt == "kitty":
-            return kitty_player(frames, plan)
-        return html_player(frames, complete, plan)
+        return kitty_player(frames, plan)
     images = []
     for i in range(plan.count):
         images.append(rasterize(render(i * plan.step)))
         if progress:
             progress(i + 1, plan.count)
+    if fmt == "gif":
+        return gif_player(images, plan)
     output = BytesIO()
     images[0].save(output, format="PNG", save_all=True, append_images=images[1:],
                    duration=plan.duration, loop=0 if plan.loop else 1,
                    disposal=0, blend=0)
+    return output.getvalue()
+
+
+def gif_player(images, plan: Timeline) -> bytes:
+    """One stable 256-colour palette, with GIF's centisecond clock.
+
+    A shared palette prevents each frame independently changing the artwork's
+    colours. Carry timing rounding forward so a long cycle does not drift.
+    Omit the repeat extension for one-shot traces: GIF loop=1 repeats twice.
+    """
+    from PIL import Image
+    samples = Image.new("RGB", (64, 64*len(images)))
+    for i, picture in enumerate(images):
+        sample = picture.copy()
+        sample.thumbnail((64,64), Image.Resampling.NEAREST)
+        samples.paste(sample, (0,64*i))
+    palette = samples.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
+    frames = [picture.quantize(palette=palette, dither=Image.Dither.NONE) for picture in images]
+    durations, previous = [], 0
+    for i in range(len(frames)):
+        end = max(previous+1, round((i+1)*plan.duration/10))
+        durations.append((end-previous)*10)
+        previous = end
+    output = BytesIO()
+    frames[0].save(output, format="GIF", save_all=True, append_images=frames[1:],
+                   duration=durations, disposal=2, optimize=False,
+                   **({"loop":0} if plan.loop and len(frames)>1 else {}))
     return output.getvalue()
 
 
@@ -153,51 +187,6 @@ def kitty_player(frames: list[bytes], plan: Timeline) -> str:
     return "".join(parts)
 
 
-def html_player(frames: list[bytes], grid: Grid, plan: Timeline | None = None) -> str:
-    from meowtext.export import to_plain
-    plan = plan or Timeline()
-    from meowtext.export import to_png
-    urls = ["data:image/png;base64," + base64.b64encode(f).decode("ascii") for f in frames]
-    poster = "data:image/png;base64," + base64.b64encode(to_png(grid)).decode("ascii")
-    payload = json.dumps({"frames": urls, "duration": plan.duration, "loop": plan.loop}, separators=(",", ":"))
-    alternative = html.escape(to_plain(grid))
-    animated = len(frames) > 1
-    return f'''<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Meowtext artwork</title>
-<style>
-html{{color-scheme:dark;background:#000;color:#eee;font:14px system-ui}}
-body{{margin:0;padding:16px}} #art{{display:block;max-width:100%;height:auto}}
-nav{{display:flex;gap:8px;margin-top:16px}} button{{font:inherit;padding:8px 14px;cursor:pointer}}
-details{{margin-top:16px}} pre{{overflow:auto;white-space:pre;font-family:monospace}}
-[hidden]{{display:none!important}}
-</style>
-<img id="art" src="{poster}" alt="Meowtext artwork; text alternative below">
-<nav {'hidden' if not animated else ''}><button id="pause" type="button">Pause</button><button id="replay" type="button">Replay</button><span id="state" role="status"></span></nav>
-<details><summary>Text alternative (colours are in the artwork above)</summary><pre><span>{alternative}</span></pre></details>
-<noscript>Animation needs JavaScript. The complete still artwork is shown above.</noscript>
-<script id="meowtext-frames" type="application/json">{payload}</script>
-<script>
-const data = JSON.parse(document.getElementById('meowtext-frames').textContent);
-const art = document.getElementById('art'), pause = document.getElementById('pause'), state = document.getElementById('state');
-let index = 0, running = data.frames.length > 1 && !matchMedia('(prefers-reduced-motion: reduce)').matches;
-let elapsed = 0, last = performance.now();
-if (running) art.src = data.frames[0];
-function label() {{ pause.textContent = running ? 'Pause' : 'Play'; state.textContent = running ? 'Playing' : 'Paused'; }}
-pause.onclick = () => {{ running = !running; last = performance.now(); label(); }};
-document.getElementById('replay').onclick = () => {{ index = 0; elapsed = 0; art.src = data.frames[0]; running = data.frames.length > 1; last = performance.now(); label(); }};
-document.addEventListener('visibilitychange', () => {{ last = performance.now(); }});
-function tick(now) {{
-  if (running && !document.hidden) {{
-    elapsed += now - last;
-    if (elapsed >= data.duration) {{
-      index += Math.floor(elapsed / data.duration); elapsed %= data.duration;
-      if (!data.loop && index >= data.frames.length - 1) {{ index = data.frames.length - 1; running = false; label(); }}
-      else index %= data.frames.length;
-      art.src = data.frames[index];
-    }}
-  }}
-  last = now; requestAnimationFrame(tick);
-}}
-label(); requestAnimationFrame(tick);
-</script></html>'''
+
+# Public compatibility name; the player now cycles colours on HTML text cells.
+from meowtext.html_export import html_player

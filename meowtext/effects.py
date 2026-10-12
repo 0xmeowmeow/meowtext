@@ -7,9 +7,10 @@ letters. The shadow is a copy of the outlined letters, shifted.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import math
 
 from meowtext.grid import Cell, Color, Grid, is_empty, is_ink
-from meowtext.palette import rotate_hue
+from meowtext.palette import rotate_hue, lift_gradient
 
 
 PALETTES: dict[str, tuple[Color, ...]] = {
@@ -59,6 +60,17 @@ PALETTES: dict[str, tuple[Color, ...]] = {
         Color(245, 245, 245),
     ),
 }
+
+PALETTES.update({
+    "aurora": tuple(Color.from_hex(c) for c in ('#49c99b', '#75e5e8', '#ae91ff', '#ecbaff')),
+    "neon": tuple(Color.from_hex(c) for c in ('#c877ff', '#ff82ce', '#70e7ff')),
+    "lagoon": tuple(Color.from_hex(c) for c in ('#4b9fe8', '#63dccd', '#c6f5bb')),
+    "candy": tuple(Color.from_hex(c) for c in ('#ff98bc', '#ffd99b', '#b9a3ff', '#98e9ed')),
+    "copper": tuple(Color.from_hex(c) for c in ('#bd825b', '#f1bd87', '#fff0c4', '#d99170')),
+    "opal": tuple(Color.from_hex(c) for c in ('#acebe7', '#e6b9f6', '#fff4d6', '#a6c5ff')),
+    "citrus": tuple(Color.from_hex(c) for c in ('#b4dc54', '#f7ed80', '#ffb85c')),
+    "mint": tuple(Color.from_hex(c) for c in ('#5fcd9b', '#a1f2cc', '#edf9dc')),
+})
 
 DEFAULT_OUTLINE = Color(90, 90, 110)
 DEFAULT_OUTLINE_HEX = DEFAULT_OUTLINE.hex()
@@ -142,6 +154,10 @@ ANIMATIONS: tuple[tuple[str, str], ...] = (
     ("Sparkle", "sparkle"),
     ("Scan", "scan"),
     ("Trace", "trace"),
+    ("Shimmer", "shimmer"),
+    ("Ripple", "ripple"),
+    ("Breathe", "breathe"),
+    ("Colour wave", "wave"),
 )
 
 TRACE_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -278,6 +294,7 @@ class BannerStyle:
     shadow_char: str | None = None
     hue: float = 0.0
     recolour_roles: bool = False
+    readable_gradients: bool = True
 
     def clone(self) -> BannerStyle:
         return replace(self)
@@ -341,6 +358,25 @@ PRESETS.update({
 })
 
 
+PRESETS.update({
+    "aurora": BannerStyle(gradient="aurora", direction="diagonal", outline=True, outline_mode="contour", outline_color=Color(121, 238, 202)),
+    "synthwave": BannerStyle(gradient="neon", bands=True, outline=True, outline_mode="heavy", outline_color=Color(100, 72, 151), shadow=True, shadow_color=Color(48, 31, 80), shadow_dx=2),
+    "lagoon": BannerStyle(gradient="lagoon", direction="vertical"),
+    "candy": BannerStyle(gradient="candy", outline=True, outline_mode="double", outline_color=Color(245, 160, 206)),
+    "copper": BannerStyle(gradient="copper", direction="vertical", bands=True, shadow=True, shadow_color=Color(88, 46, 33)),
+    "opal": BannerStyle(gradient="opal", direction="diagonal", outline=True, outline_mode="contour", outline_color=Color(152, 175, 212)),
+    "citrus": BannerStyle(gradient="citrus", direction="vertical-back", shadow=True, shadow_color=Color(52, 70, 22)),
+    "mint-chip": BannerStyle(gradient="mint", direction="vertical", shadow=True, shadow_dx=2, shadow_color=Color(36, 66, 54)),
+    "rose-gold": BannerStyle(stops=(Color(255, 151, 175), Color(255, 225, 165), Color(225, 164, 122)), outline=True, outline_mode="contour", outline_color=Color(240, 184, 137)),
+    "prism": BannerStyle(gradient="rainbow", direction="diagonal", bands=True, outline=True, outline_mode="double", outline_color=Color(207, 225, 255)),
+    "glacier": BannerStyle(gradient="ice", direction="vertical-back", outline=True, outline_mode="blocks", outline_color=Color(92, 157, 204)),
+    "hot-pink": BannerStyle(stops=(Color(255, 97, 182),)*2, outline=True, outline_mode="heavy", outline_color=Color(144, 101, 220), shadow=True, shadow_color=Color(63, 26, 72), shadow_dx=2),
+})
+
+# Fixed periods keep preview, reverse/ping-pong and every export on one clock.
+LIGHT_MOTIONS = {"shimmer": 48, "ripple": 48, "breathe": 64, "wave": 48}
+
+
 def resolve_palette(name: str) -> tuple[Color, ...]:
     """A named palette, or comma-separated hex stops such as ``#f00,#00f``."""
 
@@ -381,6 +417,8 @@ def apply_style(
     outline_phase: float | None = None,
     letter_hue: float = 0.0,
     outline_hue: float = 0.0,
+    light_motion: Animation | None = None,
+    frame: float = 0,
 ) -> Grid:
     result = grid
     if style.recolour_roles or (style.stops and len(set(style.stops)) == 1):
@@ -390,7 +428,9 @@ def apply_style(
                 cell.fg_slot = None
     if style.gradient or style.stops:
         stops = _turn(style.stops if style.stops else resolve_palette(style.gradient), letter_hue)
-        result = gradient(result, stops or (), style.direction, phase, bands=style.bands)
+        result = gradient(result, stops or (), style.direction, phase, bands=style.bands, readable=style.readable_gradients and len(set(stops or ())) > 1)
+    if light_motion and light_motion.name in LIGHT_MOTIONS:
+        result = colour_motion(result, light_motion, frame, style.readable_gradients)
     if style.outline:
         if style.outline_gradient:
             stops = style.outline_stops if style.outline_stops else resolve_palette(style.outline_gradient)
@@ -415,6 +455,7 @@ def apply_style(
             scope=style.outline_scope,
             shift_x=style.outline_dx,
             shift_y=style.outline_dy,
+            readable=style.readable_gradients,
         )
     if style.shadow:
         result = drop_shadow(
@@ -433,6 +474,7 @@ def gradient(
     direction: str = "horizontal",
     phase: float = 0.0,
     bands: bool = False,
+    readable: bool = False,
 ) -> Grid:
     """Recolour ink. Font colours on those cells are replaced."""
 
@@ -448,6 +490,8 @@ def gradient(
             if cell.fg_slot is not None or cell.bg_slot is not None:
                 continue
             colour = _sample(stops, _position(x, y, width, height, direction, phase), bands)
+            if readable:
+                colour = lift_gradient(colour)
             painted = cell.clone()
             if cell.char in ("", " ") and cell.bg is not None:
                 painted.bg = colour
@@ -474,6 +518,7 @@ def outline(
     scope: str = "word",
     shift_x: int = 0,
     shift_y: int = 0,
+    readable: bool = False,
 ) -> Grid:
     """Paint a rim around the ink. The rim does not cover the letters.
 
@@ -492,11 +537,11 @@ def outline(
     if scope == "letter":
         return _outline_letters(
             source, char, colour, mode, stops, direction, phase, pulse,
-            bands, sides, distance, place, shift_x, shift_y,
+            bands, sides, distance, place, shift_x, shift_y, readable,
         )
     return _outline_region(
         source, char, colour, mode, stops, direction, phase, pulse,
-        bands, sides, distance, place, shift_x, shift_y,
+        bands, sides, distance, place, shift_x, shift_y, readable,
     )
 
 
@@ -590,6 +635,7 @@ def _outline_letters(
     place: str,
     shift_x: int,
     shift_y: int,
+    readable: bool,
 ) -> Grid:
     """Rim each recorded letter, or each run of ink separated by a gap."""
 
@@ -605,7 +651,7 @@ def _outline_letters(
         crop.normalize()
         piece = _outline_region(
             crop, char, colour, mode, stops, direction, phase, pulse,
-            bands, sides, distance, place, shift_x, shift_y,
+            bands, sides, distance, place, shift_x, shift_y, readable,
         )
         if y0 not in lines:
             order.append(y0)
@@ -659,6 +705,7 @@ def _outline_region(
     place: str,
     shift_x: int,
     shift_y: int,
+    readable: bool,
 ) -> Grid:
     width, height = source.width, source.height
     if width == 0 or height == 0:
@@ -710,7 +757,7 @@ def _outline_region(
                     glyph = _outline_glyph(mode, char, nx, ny, neighbor_at)
                     tint = _outline_tint(
                         colour, stops, dest_x, dest_y, canvas_w, canvas_h,
-                        direction, phase, pulse, step, mode == "thick", bands,
+                        direction, phase, pulse, step, mode == "thick", bands, readable,
                     )
                     result.set(dest_x, dest_y, Cell(glyph, tint))
     for y, row in enumerate(source.rows):
@@ -799,6 +846,7 @@ def _outline_tint(
     distance: int,
     darken: bool,
     bands: bool,
+    readable: bool,
 ) -> Color:
     if stops:
         base = _sample(stops, _position(x, y, width, height, direction, phase), bands)
@@ -812,7 +860,40 @@ def _outline_tint(
             min(255, int(base.g * pulse)),
             min(255, int(base.b * pulse)),
         )
-    return base
+    return lift_gradient(base) if readable and stops and len(set(stops)) > 1 else base
+
+
+def colour_motion(grid: Grid, animation: Animation, frame: float, readable=True) -> Grid:
+    """Move light across the letters while keeping their geometry and base ink.
+
+    These motions run before outlines and shadows. Highlights add light rather
+    than blanking or dimming the lettering; wave cycles colour in space.
+    """
+    out = grid.copy()
+    phase = motion_clock(frame, animation) / LIGHT_MOTIONS[animation.name]
+    for y, row in enumerate(out.rows):
+        for x, cell in enumerate(row):
+            if not is_ink(cell):
+                continue
+            nx, ny = x / max(1, grid.width-1), y / max(1, grid.height-1)
+            background_ink = cell.char in ("", " ") and cell.bg is not None
+            base = cell.bg if background_ink else cell.fg or Color(230,230,230)
+            if animation.name == "wave":
+                tint = rotate_hue(base, 100*math.sin(math.tau*(nx*.65+ny*.25-phase)))
+                if readable:
+                    tint = lift_gradient(tint)
+            else:
+                if animation.name == "breathe":
+                    amount = .42*(.5-.5*math.cos(math.tau*phase))
+                else:
+                    position = nx*.75+ny*.25 if animation.name == "shimmer" else math.hypot(nx-.5,ny-.5)*1.6
+                    amount = .72*max(0,math.cos(math.tau*(position-phase)))**8
+                tint = Color(*(round(c+(255-c)*amount) for c in (base.r,base.g,base.b)))
+            if background_ink:
+                cell.bg = tint
+            else:
+                cell.fg = tint
+    return out
 
 
 def sparkle(grid: Grid, frame: int) -> Grid:

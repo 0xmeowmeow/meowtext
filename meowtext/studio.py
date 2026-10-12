@@ -470,6 +470,7 @@ class MeowText(App):
                             id="stops-field",
                         )
                         yield Checkbox("Hard colour bands", id="bands")
+                    yield Checkbox("Lift dark gradients", value=True, id="readable-gradients")
                     yield self.field(
                         "Font colour version",
                         Choices(
@@ -812,7 +813,7 @@ class MeowText(App):
                             )
                         yield Button("Pause / play", id="play")
                     yield Static(
-                        "HTML and Animated PNG keep your animation. PNG saves the visible frame. Save a project to keep editing; Watch plays it in Kitty.",
+                        "HTML5 cycles colours on text cells. APNG, GIF and Kitty keep motion; GIF reduces colours. PNG saves the visible frame. Save a project to keep editing; Watch plays it in Kitty.",
                         classes="help",
                     )
 
@@ -1613,6 +1614,7 @@ class MeowText(App):
             ),
             "direction": style.direction,
             "bands": style.bands,
+            "readable-gradients": style.readable_gradients,
             "outline-mode": style.outline_mode if style.outline else "none",
             "outline-distance": str(style.outline_distance),
             "outline-scope": style.outline_scope,
@@ -1780,7 +1782,7 @@ class MeowText(App):
             }.items():
                 if id == name:
                     setattr(style, attr, select(name))
-            for name in {"shadow", "bands", "outline-bands"}:
+            for name in {"shadow", "bands", "outline-bands", "readable-gradients"}:
                 if id == name:
                     setattr(style, name.replace("-", "_"), check(name))
             if id == "outline-mode":

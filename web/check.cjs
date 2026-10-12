@@ -30,6 +30,9 @@ let browser;
   assert.equal(await page.locator('#tune').evaluate(dialog=>dialog.open),true,`Tune must open: ${errors.join('; ')}`);
   await page.getByLabel('Palette',{exact:true}).selectOption('fire');await page.waitForFunction(()=>valid&&project.style.gradient==='fire');
   assert.equal(await page.evaluate(()=>project.style.stops),null,'a previous solid must not override a chosen gradient');
+  assert(await page.getByLabel('Lift dark gradients',{exact:true}).isChecked());
+  await page.getByLabel('Lift dark gradients',{exact:true}).uncheck();await page.waitForFunction(()=>valid&&!project.style.readable_gradients);
+  await page.getByLabel('Lift dark gradients',{exact:true}).check();await page.waitForFunction(()=>valid&&project.style.readable_gradients);
   await page.keyboard.press('Escape');await page.click('#motions [data-value="hue"]');await page.waitForFunction(()=>valid);
   await page.keyboard.press('Alt+p');const before=await page.locator('#art').getAttribute('src');
   await page.waitForTimeout(300);assert.equal(await page.locator('#art').getAttribute('src'),before);
@@ -41,6 +44,25 @@ let browser;
   await page.selectOption('#format','kitty');const [kitty]=await Promise.all([page.waitForEvent('download'),page.click('#download')]);
   const kstream=await kitty.createReadStream(),kchunks=[];for await(const chunk of kstream)kchunks.push(chunk);
   assert(Buffer.concat(kchunks).toString().includes('s=3,v=1'));
+  await page.selectOption('#format','gif');assert((await page.locator('#export-notice').innerText()).includes('256'));
+  const [gif]=await Promise.all([page.waitForEvent('download'),page.click('#download')]);
+  const gs=await gif.createReadStream(),gc=[];for await(const chunk of gs)gc.push(chunk);
+  assert.equal(Buffer.concat(gc).subarray(0,6).toString(),'GIF89a');
+  await page.selectOption('#format','html');const [html]=await Promise.all([page.waitForEvent('download'),page.click('#download')]);
+  const hs=await html.createReadStream(),hc=[];for await(const chunk of hs)hc.push(chunk);
+  const document=Buffer.concat(hc).toString();assert(!document.includes('data:image'));
+  const exported=await context.newPage();await exported.setContent(document);
+  assert(await exported.locator('#art .cell').count()>0);assert.equal(await exported.locator('img,canvas').count(),0);
+  const colours=await exported.locator('#art').getAttribute('style');await exported.waitForTimeout(300);assert.notEqual(await exported.locator('#art').getAttribute('style'),colours);
+  await exported.click('#pause');const paused=await exported.locator('#art').getAttribute('style');await exported.waitForTimeout(300);assert.equal(await exported.locator('#art').getAttribute('style'),paused);
+  await exported.close();
+  await page.keyboard.press('Alt+2');assert.equal(await page.locator('#looks button').count(),40);
+  for(const motion of ['shimmer','ripple','breathe','wave']){
+    await page.click(`#motions [data-value="${motion}"]`);await page.waitForFunction(name=>valid&&project.animation.name===name,motion);
+    const first=await page.locator('#art').getAttribute('src');await page.waitForTimeout(550);assert.notEqual(await page.locator('#art').getAttribute('src'),first,motion);
+  }
+  await page.click('#looks [data-value="aurora"]');await page.waitForFunction(()=>valid&&project.style.gradient==='aurora');
+  await page.click('[data-tune="motion"]');assert.equal(await page.getByLabel('Animated layers',{exact:true}).isVisible(),false);await page.keyboard.press('Escape');
   for(const width of [320,390,768,1024,1366,1920]){
     await page.setViewportSize({width,height:800});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`overflow at ${width}`);
   }
@@ -49,10 +71,11 @@ let browser;
   await failure.route('**/pyodide.asm.wasm',route=>{if(fail){fail=false;return route.fulfill({status:503,body:'temporary outage'});}return route.continue();});
   const retry=await failure.newPage();await retry.goto(base);await retry.fill('#words','KEEP ME');
   await retry.waitForFunction(()=>document.querySelector('#load-heading').textContent.includes('could not'));
+  await retry.waitForTimeout(300);assert((await retry.locator('#load-heading').innerText()).includes('could not'),'late downloads must not overwrite a failure');
   assert((await retry.locator('#load-detail').innerText()).includes('503'));
   await retry.click('#retry');await retry.waitForFunction(()=>document.querySelector('#loader').hidden);
   assert.equal(await retry.evaluate(()=>project.text),'KEEP ME');await failure.close();
   const reduced=await browser.newPage({reducedMotion:'reduce'});await reduced.goto(base);await reduced.waitForFunction(()=>document.querySelector('#loader').hidden);
   assert.equal(await reduced.evaluate(()=>playing),false);assert((await reduced.locator('#motions img').first().getAttribute('src')).includes('-still'));
-  console.log('PASS: comparisons, keyboard controls, palette precedence, exact PNG, animated Kitty, phone layouts, failed startup/retry, typed words, reduced motion');
+  console.log('PASS: comparisons, keyboard controls, readable gradients, new presets/motions, exact PNG, animated GIF/Kitty, actual HTML5 colour cycling, phone layouts, failed startup/retry, typed words, reduced motion');
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();server.close();});

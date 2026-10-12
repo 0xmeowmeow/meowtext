@@ -212,10 +212,10 @@ class KeyboardInventoryTests(unittest.TestCase):
                     self.assertGreater(bank.region.width, 20)
                 await pilot.press("tab", "end")
                 await pilot.pause()
-                self.assertEqual(app.project.animation.name, "trace")
+                self.assertEqual(app.project.animation.name, "wave")
                 self.assertGreater(app.query_one("#motion-inventory").scroll_y, 0)
                 self.assertIn(
-                    "Trace", app.query_one("#motion-inventory").render_line(0).text
+                    "Colour wave", app.query_one("#motion-inventory").render_line(0).text
                 )
 
         with (

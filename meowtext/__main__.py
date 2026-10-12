@@ -23,6 +23,7 @@ _SUFFIXES = {
     ".json": "json",
     ".png": "png",
     ".apng": "apng",
+    ".gif": "gif",
     ".kitty": "kitty",
     ".irc": "irc",
     ".md": "markdown",
@@ -184,7 +185,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "show":
             project = library.load(args.name)
-            if args.format in {"html", "apng"}:
+            if args.format in {"html", "apng", "gif"} or (args.format == "kitty" and project.animation.name != "none"):
+                print(export_notice(args.format, project.animation.name != "none"), file=sys.stderr)
                 if args.text:
                     project.text = " ".join(args.text)
                     project.patches = ()
@@ -255,6 +257,8 @@ def _render(args: argparse.Namespace) -> int:
     if fmt is None and args.output:
         fmt = _SUFFIXES.get(Path(args.output).suffix.lower(), "ansi")
     fmt = fmt or "ansi"
+    if fmt == "gif":
+        print(export_notice(fmt), file=sys.stderr)
     data = export(banner.grid, fmt)
     return _write(data, args.output, fmt)
 

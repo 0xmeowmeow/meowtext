@@ -105,6 +105,8 @@ def present(
         outline_phase=outline_phase,
         letter_hue=letter_hue,
         outline_hue=outline_hue,
+        light_motion=motion,
+        frame=frame,
     )
     if motion.name == "sparkle":
         styled = sparkle(styled, int(motion_clock(frame, motion)))

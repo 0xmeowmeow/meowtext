@@ -183,6 +183,7 @@ document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => tab(b.dat
 document.querySelectorAll('[data-tune]').forEach(b => b.onclick = () => tune(b.dataset.tune));
 function field(label, key, type = 'text', options, group = 'style') {
   const wrap = document.createElement('label'); wrap.append(document.createTextNode(label));
+  wrap.dataset.field = key;
   const obj = group ? project[group] : project;
   const input = document.createElement(options ? 'select' : type === 'textarea' ? 'textarea' : 'input');
   input.setAttribute('aria-label',label);
@@ -201,11 +202,19 @@ function field(label, key, type = 'text', options, group = 'style') {
     if(key==='stops'&&value)target.gradient=null;
     if(key==='outline_stops'&&value)target.outline_gradient=null;
     if (group==='animation' && key==='name') playing = value!=='none' && samplesMoving;
+    if (group==='animation' && key==='name') motionFields();
     commit();
   };
   wrap.append(input); $('tune-controls').append(wrap);
 }
 const directions = ['horizontal','horizontal-back','vertical','vertical-back','diagonal','diagonal-back'];
+function motionFields() {
+  const name=project.animation.name;
+  for(const field of $('tune-controls').querySelectorAll('[data-field]')) {
+    const key=field.dataset.field;
+    field.hidden=['travel','layers'].includes(key)?!['hue','march'].includes(name):['pattern','reveal'].includes(key)?name!=='trace':false;
+  }
+}
 function tune(kind) {
   if (!ready) return;
   $('tune-controls').replaceChildren(); $('tune-title').textContent = {look:'Tune the look',edge:'Tune the edges',motion:'Tune the motion',paint:'Paint cells'}[kind];
@@ -214,6 +223,7 @@ function tune(kind) {
     const solidLabel=document.createElement('label');solidLabel.textContent='Solid colour';
     const solid=document.createElement('input');solid.type='color';solid.value=project.style.stops?.[0]||'#65e8ed';solid.onchange=()=>{remember();project.style.gradient=null;project.style.stops=[solid.value,solid.value];commit();};solidLabel.append(solid);$('tune-controls').append(solidLabel);
     field('Palette','gradient','text',palettes); field('Custom colours · comma-separated #hex','stops');
+    field('Lift dark gradients','readable_gradients','checkbox');
     field('Gradient direction','direction','text',directions); field('Hard colour bands','bands','checkbox');
     field('Rotate colour roles · degrees','hue','number',null,null); field('Recolour original font roles','recolour_roles','checkbox');
     field('Project notes','notes','textarea',null,null);
@@ -238,7 +248,8 @@ function tune(kind) {
     field('Speed','speed','number',null,'animation'); field('Direction','direction','text',['forward','backward','pingpong'],'animation');
     field('Colour travel · 1–360°','travel','number',null,'animation'); field('Animated layers','layers','text',['all','roles','letters','outline'],'animation');
     field('Trace path','pattern','text',['outline','rows','letter','centre'],'animation'); field('Trace mode','reveal','text',['draw','runner'],'animation');
-    const p = document.createElement('p'); p.textContent = 'Draw reveals the whole artwork and holds. Runner, hue, march, pulse, scan and sparkle repeat. Export limits are reported before any file is downloaded.'; $('tune-controls').append(p);
+    motionFields();
+    const p = document.createElement('p'); p.textContent = 'Shimmer sweeps light across the letters; Ripple sends it out from the centre; Breathe adds a slow glow; Colour wave rolls hues across the word. These four affect the letters. Draw reveals the whole artwork and holds; other motions repeat.'; $('tune-controls').append(p);
   } else {
     const p = document.createElement('p'); p.textContent = 'Choose a character and colour, close this panel, then click cells in the artwork. Painting pauses playback. Undo reverses each stroke.'; $('tune-controls').append(p);
     for (const [name,type,value,fn] of [['Character','text',paintChar,v=>paintChar=[...v][0]||' '],['Colour','color',paintColor,v=>paintColor=v]]) {
@@ -256,7 +267,7 @@ async function download(fmt, name) {
   try {
     const result = await rpc('export', {format:fmt, frame:displayedFrame});
     const bytes = Uint8Array.from(atob(result.data), c => c.charCodeAt(0));
-    downloadBytes(bytes,name,{html:'text/html',png:'image/png',apng:'image/apng',project:'application/json',json:'application/json'}[fmt]||'text/plain');
+    downloadBytes(bytes,name,{html:'text/html',png:'image/png',apng:'image/apng',gif:'image/gif',project:'application/json',json:'application/json'}[fmt]||'text/plain');
     status('Downloaded ' + name + '. ' + result.notice);
   } catch(error) { report(error); }
   finally { $('download').disabled = !valid; }

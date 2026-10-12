@@ -167,6 +167,7 @@ def _style_to(style: BannerStyle) -> dict:
         "shadow_char": style.shadow_char,
         "hue": style.hue,
         "recolour_roles": style.recolour_roles,
+        "readable_gradients": style.readable_gradients,
     }
     return payload
 
@@ -202,6 +203,7 @@ def _style_from(raw: dict) -> BannerStyle:
     style.shadow_char = None if not shadow_char else str(shadow_char)[:1]
     style.hue = float(raw.get("hue") or 0)
     style.recolour_roles = bool(raw.get("recolour_roles", False))
+    style.readable_gradients = bool(raw.get("readable_gradients", True))
     return style
 
 

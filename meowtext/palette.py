@@ -11,8 +11,52 @@ paints several separate sections can be split so each section is its own role.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
+import math
 
 from meowtext.grid import VGA, Cell, Color, Grid
+
+# Relative sRGB luminance, after linearisation. Applied to generated gradients,
+# not to the user's original ANSI roles, solid paint or decorative shadows.
+# https://www.w3.org/TR/WCAG22/#dfn-relative-luminance
+GRADIENT_LUMINANCE = 0.22
+
+
+def _linear(value: int) -> float:
+    channel = value / 255
+    return channel / 12.92 if channel <= .04045 else ((channel + .055) / 1.055) ** 2.4
+
+
+def luminance(colour: Color) -> float:
+    return sum(weight * _linear(value) for weight, value in zip((.2126, .7152, .0722), (colour.r, colour.g, colour.b)))
+
+
+@lru_cache(maxsize=8192)
+def lift_gradient(colour: Color) -> Color:
+    """Lift dark colours, keeping saturated hues until they reach the gamut.
+
+    Then add only enough white to bring deep blues above the same luminance
+    floor. Correct the sampled colour, so interpolation and hue rotation
+    cannot introduce another dark patch between otherwise bright stops.
+    """
+    channels = tuple(_linear(c) for c in (colour.r, colour.g, colour.b))
+    light = sum(w*c for w,c in zip((.2126,.7152,.0722),channels))
+    if light >= GRADIENT_LUMINANCE:
+        return colour
+    peak = max(channels)
+    if not peak:
+        channels = (GRADIENT_LUMINANCE,) * 3
+    else:
+        gain = min(GRADIENT_LUMINANCE / light, 1 / peak)
+        channels = tuple(c*gain for c in channels)
+        light *= gain
+        if light < GRADIENT_LUMINANCE:
+            white = (GRADIENT_LUMINANCE-light)/(1-light)
+            channels = tuple(c+(1-c)*white for c in channels)
+    def encode(c):
+        value = 12.92*c if c <= .0031308 else 1.055*c**(1/2.4)-.055
+        return min(255, math.ceil(value*255))
+    return Color(*(encode(c) for c in channels))
 
 DOS_NAMES: tuple[str, ...] = (
     "black",

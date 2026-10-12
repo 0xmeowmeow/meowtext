@@ -226,6 +226,12 @@ class StudioTests(unittest.TestCase):
                 await pilot.pause()
                 self.assertTrue(app.query_one("#gradient-settings").display)
                 self.assertFalse(app.query_one("#solid-field").display)
+                app.query_one("#readable-gradients", Checkbox).value = False
+                await pilot.pause()
+                self.assertFalse(app.project.style.readable_gradients)
+                app.query_one("#readable-gradients", Checkbox).value = True
+                await pilot.pause()
+                self.assertTrue(app.project.style.readable_gradients)
                 app.query_one("#outline-mode", Choices).value = "shade"
                 await pilot.pause()
                 self.assertTrue(app.query_one("#outline-settings").display)

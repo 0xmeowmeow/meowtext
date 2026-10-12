@@ -137,7 +137,7 @@ class GridTests(unittest.TestCase):
         from meowtext.palette import rotate_hue
 
         grid = Grid([[Cell("X") for _ in range(8)]])
-        style = BannerStyle(gradient="rainbow")
+        style = BannerStyle(gradient="rainbow", readable_gradients=False)
         still = present(grid, style, animation=Animation(name="hue"), frame=0)
         spun = present(grid, style, animation=Animation(name="hue"), frame=10)
         slid = present(grid, style, animation=Animation(name="march"), frame=10)
@@ -164,8 +164,9 @@ class GridTests(unittest.TestCase):
         top_rim = styled.get(1, 0).fg
         bottom_rim = styled.get(1, 6).fg
         assert top_letter and bottom_letter and top_rim and bottom_rim
-        self.assertLess(top_letter.b, bottom_letter.b)
-        self.assertGreater(top_rim.b, bottom_rim.b)
+        from meowtext.palette import luminance
+        self.assertLess(luminance(top_letter), luminance(bottom_letter))
+        self.assertGreater(luminance(top_rim), luminance(bottom_rim))
 
 
 class TdfTests(unittest.TestCase):

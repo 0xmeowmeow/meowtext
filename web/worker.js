@@ -1,8 +1,10 @@
 // The renderer is shared Python. Input stays on the browser's main thread.
 let runtime, boot, initialized = false, draining = false;
 const queue = [], originalFetch = self.fetch.bind(self), downloads = new Map(), fontJobs = new Map();
-let sentAt = 0, phase = 'download';
+let sentAt = 0, phase = 'download', startupFailed = false;
+const startupAbort = new AbortController();
 function progress(force = false) {
+  if (startupFailed) return;
   if (!force && performance.now() - sentAt < 180) return;
   sentAt = performance.now();
   postMessage({loading:{phase, files:[...downloads.values()]}});
@@ -11,7 +13,7 @@ async function fetchBytes(url, info) {
   const key = new URL(url, self.location.href).href;
   const entry = {name:info.label, size:info.size, loaded:0, done:false};
   downloads.set(key, entry); progress(true);
-  const response = await originalFetch(key, {cache:new URL(self.location.href).searchParams.has('retry')?'reload':'default'});
+  const response = await originalFetch(key, {cache:new URL(self.location.href).searchParams.has('retry')?'reload':'default', signal:startupAbort.signal});
   if (!response.ok) throw Error(`${info.label} could not download (HTTP ${response.status}). Retry to reconnect.`);
   const reader = response.body.getReader(), pieces = [];
   while (true) {
@@ -36,9 +38,13 @@ async function initialize() {
   const cached = new Map();
   // Downloads run together, with real byte counts. Python starts only when its
   // dependencies have arrived; a failed attempt never becomes a ready runtime.
-  await Promise.all(Object.entries(boot.files).map(async ([url, info]) => {
-    cached.set(new URL(url, self.location.href).href, await fetchBytes(url, info));
-  }));
+  try {
+    await Promise.all(Object.entries(boot.files).map(async ([url, info]) => {
+      cached.set(new URL(url, self.location.href).href, await fetchBytes(url, info));
+    }));
+  } catch(error) {
+    startupFailed = true; startupAbort.abort(); throw error;
+  }
   phase = 'starting'; progress(true);
   self.fetch = async (resource, options) => {
     const url = new URL(typeof resource === 'string' || resource instanceof URL ? resource : resource.url, self.location.href).href;

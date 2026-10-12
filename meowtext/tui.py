@@ -872,6 +872,7 @@ class MeowText(App):
         self.knobs["gradient"] = "on" if style.gradient else "off"
         self.knobs["palette"] = "edited" if style.stops else (style.gradient or "rainbow")
         self.knobs["direction"] = style.direction
+        self.knobs["readable-gradients"] = style.readable_gradients
         self.knobs["outline"] = "on" if style.outline else "off"
         self.knobs["outline-mode"] = style.outline_mode
         self.knobs["symbol"] = style.outline_char
@@ -908,6 +909,7 @@ class MeowText(App):
             direction=self._choice("direction", "horizontal"),
             stops=self._stops,
             bands=self._bands,
+            readable_gradients=self.knobs.get("readable-gradients", True),
             outline=self.knobs.get("outline") == "on",
             outline_char=self._choice("symbol", "░")[:1],
             outline_color=COLOURS.get(self._choice("outline-colour", "slate"), DEFAULT_OUTLINE),

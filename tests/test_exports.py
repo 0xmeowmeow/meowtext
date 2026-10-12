@@ -24,7 +24,7 @@ class ExportFidelityTests(unittest.TestCase):
                                animation=Animation(name="hue"))
 
     def payload(self, document):
-        return json.loads(re.search(r'<script id="meowtext-frames" type="application/json">(.*?)</script>', document, re.S)[1])
+        return json.loads(re.search(r'<script id="meowtext-animation" type="application/json">(.*?)</script>', document, re.S)[1])
 
     def test_png_is_current_composed_frame_and_keeps_backgrounds(self):
         png = export_design(self.source, self.project, "png", frame=7)
@@ -38,35 +38,49 @@ class ExportFidelityTests(unittest.TestCase):
         self.assertEqual(image.getpixel((cw // 2, ch)), (255, 255, 255))
         self.assertEqual(image.getpixel((cw // 2, 2 * ch - 1)), (255, 255, 255))
 
-    def test_html_embeds_the_same_png_and_escapes_text(self):
+    def test_html_contains_text_and_colour_tracks_not_image_frames(self):
         self.source.rows[0][0].char = "</script>"
         document = to_html(self.source)
         payload = self.payload(document)
-        self.assertEqual(base64.b64decode(payload["frames"][0].split(",", 1)[1]), to_png(self.source))
+        self.assertEqual(payload["count"], 1)
+        self.assertIn('<pre id="art"', document)
         self.assertIn("&lt;/script&gt;", document)
-        self.assertNotIn("https://", document)
+        self.assertIn("data:font/ttf;base64,", document)
+        self.assertNotIn("<img", document)
+        self.assertNotIn("data:image", document)
+        self.assertIn("style.setProperty", document)
+        self.assertIn("opacity:0", document)  # geometric cells keep selectable text
 
     def test_html_and_apng_keep_every_hue_frame_and_timing(self):
         document = export_design(self.source, self.project, "html")
         payload = self.payload(document)
         png = Image.open(BytesIO(export_design(self.source, self.project, "apng")))
-        self.assertEqual(len(payload["frames"]), 30)
+        self.assertEqual(payload["count"], 30)
         self.assertEqual(png.n_frames, 30)
         self.assertEqual(payload["duration"], 120)
+        cells = re.findall(r'<span class="cell[^"\n]*" style="color:var\(--c(\d+)\);background-color:var\(--c(\d+)\)">',document)
+        complete = present(self.source, self.project.style)
+        self.assertEqual(len(cells), complete.width * complete.height)
         for index in (0, 7, 29):
-            expected = rasterize(present(self.source, self.project.style, animation=self.project.animation, frame=index))
+            grid = present(self.source, self.project.style, animation=self.project.animation, frame=index)
+            expected = rasterize(grid)
             png.seek(index)
-            html_frame = Image.open(BytesIO(base64.b64decode(payload["frames"][index].split(",", 1)[1])))
             self.assertEqual(png.convert("RGB").tobytes(), expected.tobytes())
-            self.assertEqual(html_frame.tobytes(), expected.tobytes())
+            for (fg,bg), cell in zip(cells, (c for row in grid.rows for c in row)):
+                for track_id, colour in ((fg,cell.fg.hex() if cell.fg else '#e6e6e6'),(bg,cell.bg.hex() if cell.bg else '#000000')):
+                    track = payload["tracks"][int(track_id)]
+                    self.assertEqual(payload["colours"][track[index if len(track)>1 else 0]],colour)
 
     def test_reveal_finishes_and_holds_in_both_directions(self):
         for direction in ("forward", "backward"):
             self.project.animation = Animation(name="trace", direction=direction)
             payload = self.payload(export_design(self.source, self.project, "html"))
             self.assertFalse(payload["loop"])
-            final = base64.b64decode(payload["frames"][-1].split(",", 1)[1])
-            self.assertEqual(final, to_png(present(self.source, self.project.style)))
+            self.assertTrue(payload["changes"])
+            complete = present(self.source, self.project.style)
+            for offset, glyphs in payload["changes"]:
+                cell = complete.get(offset % complete.width, offset // complete.width)
+                self.assertEqual(payload["characters"][glyphs[-1]],cell.char or " ")
 
     def test_export_notices_explain_actual_losses(self):
         for fmt in ("png", "ansi", "json", "plain", "markdown", "irc"):

@@ -115,7 +115,7 @@ with tempfile.TemporaryDirectory(prefix="meowtext-web-") as temp:
         canvas.paste(swatch, (left+(293-swatch.width)//2,390+(164-swatch.height)//2),swatch)
     canvas.save(assets / "tile.png")
 
-    modules = ("__init__", "ansi", "animation_export", "catalog", "compose", "discovery",
+    modules = ("__init__", "ansi", "animation_export", "html_export", "catalog", "compose", "discovery",
                "effects", "errors", "export", "grid", "library", "packs", "palette", "project", "raster")
     items = [Specimen(FontInfo(**i["font"]), tuple(i["features"]), tuple(i["categories"])) for i in index]
     bootstrap = bridge.configuration(items)

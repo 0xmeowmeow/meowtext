@@ -30,12 +30,13 @@ _MIRC: tuple[Color, ...] = (
     Color(210, 210, 210),
 )
 
-FORMATS = ("html", "png", "apng", "ansi", "plain", "json", "kitty", "irc", "markdown")
+FORMATS = ("html", "png", "apng", "gif", "ansi", "plain", "json", "kitty", "irc", "markdown")
 
 FORMAT_LABELS = {
-    "html": "HTML · artwork + animation",
+    "html": "HTML5 · text + colour cycling",
     "png": "PNG · still image",
     "apng": "Animated PNG · lossless animation",
+    "gif": "Animated GIF · 256 colours",
     "ansi": "ANSI · terminal still",
     "plain": "Plain text · no colour or motion",
     "json": "JSON · cell data, one frame",
@@ -49,9 +50,10 @@ FORMAT_LABELS = {
 def export_notice(fmt: str, animated: bool = False) -> str:
     """Explain the actual contract before a file is written."""
     notices = {
-        "html": "Keeps cell alignment, colours, borders and shadows in a self-contained page.",
+        "html": "HTML5 text cells with an embedded font and fixed alignment. Colours cycle in the page; no image frames. Browser font smoothing can differ slightly from PNG.",
         "png": "Still image of the frame currently shown. Keeps colours, borders and shadows.",
         "apng": "Lossless animated PNG. Open in a modern browser; some image viewers show only its first frame.",
+        "gif": "Animated GIF keeps motion, with a shared 256-colour palette. Gradients can show bands or colour shifts; timing rounds to 10 ms. Choose HTML5 or APNG for full colour.",
         "ansi": "One frame with true colour. Appearance depends on the terminal's font and cell size.",
         "plain": "Characters only: removes all colours, including painted backgrounds.",
         "markdown": "Characters in a code block: removes all colours, including painted backgrounds.",
@@ -66,8 +68,8 @@ def export_notice(fmt: str, animated: bool = False) -> str:
             notice += " Plays the animation at editor speed, with Pause and Replay controls."
         elif fmt == "kitty":
             notice += " Kitty plays the complete animation itself, even after cat exits. Requires Kitty 0.20 or newer."
-        elif fmt not in {"apng", "project"}:
-            notice += " Animation will be lost. Choose HTML, Animated PNG or Kitty to keep it; pause first to choose a still."
+        elif fmt not in {"apng", "gif", "project"}:
+            notice += " Animation will be lost. Choose HTML5, Animated PNG, GIF or Kitty to keep it; pause first to choose a still."
     return notice
 
 _MONO_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
@@ -84,6 +86,7 @@ def export(grid: Grid, fmt: str) -> str | bytes:
         "json": to_json,
         "png": to_png,
         "apng": to_png,
+        "gif": to_gif,
         "kitty": to_kitty,
         "irc": to_irc,
         "markdown": to_markdown,
@@ -140,9 +143,16 @@ def to_ansi(grid: Grid) -> str:
 
 
 def to_html(grid: Grid) -> str:
-    from meowtext.animation_export import html_player
+    from meowtext.animation_export import html_player, Timeline
 
-    return html_player([to_png(grid)], grid)
+    return html_player([grid], grid, Timeline())
+
+
+def to_gif(grid: Grid) -> bytes:
+    from meowtext.animation_export import gif_player, Timeline
+    from meowtext.raster import rasterize
+
+    return gif_player([rasterize(grid)], Timeline())
 
 
 def to_json(grid: Grid) -> str:

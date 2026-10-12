@@ -41,7 +41,7 @@ The Kitty edition keeps the same specimen inventories:
 3. **Tune:** press **Enter** in a panel to reveal the detailed settings. These also preview immediately; **Escape** returns to the inventory. Solid fills hide gradient controls, disabled borders hide border settings, and each animation shows its relevant controls. Colour roles and painting live in Looks; shadows live in Edges. **Ctrl+Z** undoes an effect change.
 4. **Save & use:** the name comes from your words. Changing the name updates the export filename. A custom name or path stays yours. Save, choose where the banner should appear, and press **Copy command**.
 
-`Ctrl+T` edits the words, `Ctrl+F` returns to fonts, `Ctrl+P` inspects at actual cell size, `Ctrl+S` opens Save & use, and `Ctrl+Q` quits. F1–F4 switch sections; F2 compares 28 ready-made looks using your words and font. **Alt+1/2/3** jumps to a decoration panel. **F5** freezes the animated interface specimens and logo. Mouse clicks work too. Small windows scroll to keep the selected item visible; no window dimensions or terminal font sizes are forced.
+`Ctrl+T` edits the words, `Ctrl+F` returns to fonts, `Ctrl+P` inspects at actual cell size, `Ctrl+S` opens Save & use, and `Ctrl+Q` quits. F1–F4 switch sections; F2 compares 40 ready-made looks using your words and font. **Alt+1/2/3** jumps to a decoration panel. **F5** freezes the animated interface specimens and logo. Mouse clicks work too. Small windows scroll to keep the selected item visible; no window dimensions or terminal font sizes are forced.
 
 Font discovery measures shape, weight, size and colour locally, supplemented by familiar font-family names. Its first screen appears immediately while the full catalogue is indexed, then cached. Exploring keeps close alternatives and labelled wildcards, with copies and colour variants grouped out of the comparison. **Browse all** retains every catalogue entry. **Back** restores the previous round exactly. The number of fonts depends on what you have installed; thousands are supported. Discovery helps you explore rather than guaranteeing a particular font in four clicks.
 
@@ -89,12 +89,13 @@ Markdown keeps the letter shapes in a code block. ANSI colours belong in termina
 
 ## Export what you made
 
-HTML is the default export: a self-contained page with lossless rendered frames, fixed cell alignment, and Pause/Replay controls. It needs no installed fonts or network connection. Colour cycles repeat; trace drawing finishes and holds. Reduced-motion preferences start playback paused on the complete artwork.
+HTML5 is the default export: selectable text cells whose colours cycle through CSS variables and JavaScript. It includes the DejaVu font, fixed cell alignment, and Pause/Replay controls. Unicode blocks, shades and borders use CSS geometry shared with the raster renderer; no image frames are embedded. It works offline. Colour cycles repeat; trace drawing finishes and holds. Reduced-motion preferences start playback paused on the complete artwork, which also remains visible without JavaScript.
 
 | Format | Preserves | Limits shown before export |
 | --- | --- | --- |
-| HTML | Colours, geometry, borders, shadows, animation | JavaScript is needed for playback; includes a still fallback and text alternative |
+| HTML5 | Selectable text, colours, cell alignment, borders, shadows, animation | JavaScript drives colour cycling; browser font smoothing can differ slightly from PNG |
 | Animated PNG (`.apng`) | Lossless colour and animation | Some image viewers show only the first frame |
+| Animated GIF (`.gif`) | Complete motion with broad image-viewer support | One shared 256-colour palette; gradients can show bands or colour shifts; timing rounds to 10 ms |
 | Kitty (`.kitty`) | Colours, geometry and complete animation | Run `cat your-file.kitty` in Kitty 0.20 or newer; the terminal plays it after `cat` exits |
 | PNG | The visible frame, including backgrounds and effects | Still image; animation is lost |
 | ANSI | Characters and true colours | Still; receiving terminal controls font and cell geometry |
@@ -108,16 +109,22 @@ Saved animated designs start playing when opened in Kitty. The visible preview c
 ```sh
 meowtext export design.meowtext -o design.html
 meowtext export design.meowtext -o design.apng
+meowtext export design.meowtext -o design.gif
 meowtext export design.meowtext --frame 12 -o still.png
 meowtext show neon --format html -o neon.html
 ```
 
 ## Effects that carry forward
 
+**Lift dark gradients** is on by default. It brightens the dark parts of letter and border gradients after interpolation and hue rotation, so colour cycling cannot turn them almost black. It preserves bright colours, authored solid fills, original ANSI colour roles and shadows. Turn it off in Tune look for deliberately dark gradients; the setting travels with the project. It targets dark backgrounds, not arbitrary terminal themes.
+
+There are 40 preset looks, including Aurora, Synthwave, Lagoon, Candy, Copper, Opal, Citrus, Mint chip, Rose gold, Prism, Glacier and Hot pink. Eight new palettes also appear in the gradient controls.
+
 - Solid colours, named palettes, custom gradient stops, hard bands and six gradient directions.
 - Shade, thick, contour, heavy, double and block outlines. Set width, sides, inside/outside placement, whole-word or per-letter scope, offsets, and a separate outline gradient and speed.
 - Drop shadows with their own offsets, colour and character.
 - Hue cycle, marching gradients, outline pulse, sparkle, scan and trace. Set speed, direction, colour travel and animated layers. Trace supports outline, rows, letters and centre paths, with draw-on or runner behaviour.
+- Shimmer sweeps a bright highlight across the letters; Ripple sends highlights out from their centre; Breathe adds a slow glow; Colour wave rolls hues across the word. These four preserve letter geometry and leave shadows alone. Speed and direction apply to all of them.
 - TheDraw colour variants and linked or independent colour roles. Split separate sections into independent roles, focus a role in the preview, and edit named colours or HSV values.
 - Cell painting, individual letter edits, undo, and project notes. These change the design, not the font file.
 - Existing custom palettes, presets and symbols under the Meowtext configuration directory, and favourites saved by the original editor.
@@ -135,7 +142,7 @@ A saved library design contains both the editable recipe and a frozen copy of it
 
 The Kitty edition discovers system FIGlet/TOIlet fonts and `~/.config/meowtext/fonts` automatically. TheDraw `.tdf` files are read directly; the existing `~/.config/tdfgo/fonts` directory is also recognised. `meowtext fonts --fetch` downloads the optional extra FIGlet collection. The browser's PyFIGlet fonts and DejaVu raster font are bundled with their licenses in `web/vendor`; other font packs retain their original terms.
 
-Exports include animated HTML, Kitty and APNG, PNG stills, ANSI, text, JSON cell data, Kitty graphics, IRC, Markdown and editable `.meowtext` projects. PNG and Kitty previews use DejaVu Sans Mono with geometric block, shade and box-drawing cells.
+Exports include HTML5 colour cycling, animated GIF, Kitty and APNG, PNG stills, ANSI, text, JSON cell data, Kitty graphics, IRC, Markdown and editable `.meowtext` projects. PNG and Kitty previews use DejaVu Sans Mono with geometric block, shade and box-drawing cells.
 
 ```sh
 meowtext render "MEOW" -f standard --preset sunset-rim
