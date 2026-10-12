@@ -75,8 +75,8 @@ def render_project(project: Project, text: str | None = None, frame: int = 0) ->
     words = project.text if text is None else text
     source, missing, folded = layout_font(words, font, project.letters or None)
     if (
-        project.style.outline
-        and project.style.outline_scope == "letter"
+        (project.animation.name == "trace"
+         or (project.style.outline and project.style.outline_scope == "letter"))
         and not source.spans
     ):
         source.spans = measure_spans(font, words)

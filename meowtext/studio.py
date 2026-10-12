@@ -1262,8 +1262,8 @@ class MeowText(App):
                 self.source_key = key
                 self._role_signature = None
             if (
-                self.project.style.outline
-                and self.project.style.outline_scope == "letter"
+                (self.project.animation.name == "trace"
+                 or (self.project.style.outline and self.project.style.outline_scope == "letter"))
                 and not self.source.spans
             ):
                 self.source.spans = measure_spans(self.font, self.project.text)

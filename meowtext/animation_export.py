@@ -13,7 +13,7 @@ from fractions import Fraction
 from io import BytesIO
 
 from meowtext.compose import present
-from meowtext.effects import Animation, LIGHT_MOTIONS, _trace_order
+from meowtext.effects import Animation, LIGHT_MOTIONS, trace_plan
 from meowtext.errors import RenderError
 from meowtext.grid import Grid
 from meowtext.palette import RelationPalette
@@ -43,7 +43,23 @@ def timeline(grid, motion, outline_speed=1.0):
         return Timeline()
     speed = motion.speed if motion.speed > 0 else 1
     loop = True
-    if motion.direction == "pingpong":
+    if name == "trace":
+        steps = trace_plan(grid, motion.pattern).steps
+        if motion.direction == "pingpong":
+            # Sample the turnaround exactly, including at fractional speeds.
+            period = 2 * max(1, steps - 1) / speed
+            count = 2 * max(1, math.ceil(period / 2))
+            if count > MAX_FRAMES:
+                raise RenderError("This animation cycle exceeds 720 frames. Increase motion speed before exporting animation.")
+            return Timeline(count, period / count, FRAME_MS * period / count, True)
+        if motion.reveal == "runner":
+            period = steps / speed
+        else:
+            count = max(1, math.ceil((steps - 1) / speed) + 1)
+            if count > MAX_FRAMES:
+                raise RenderError("This reveal exceeds 720 frames. Increase motion speed or choose a smaller font before exporting animation.")
+            return Timeline(count, 1, FRAME_MS, False)
+    elif motion.direction == "pingpong":
         period = 48 / speed
     elif name in {"hue", "march"}:
         base = max(1, min(360, motion.travel)) / 12 if name == "hue" else 24
@@ -61,16 +77,6 @@ def timeline(grid, motion, outline_speed=1.0):
         period = 11 / speed
     elif name == "scan":
         period = (grid.width + 6) / speed
-    elif name == "trace":
-        ink = len(_trace_order(grid, motion.pattern))
-        if motion.reveal == "runner":
-            period = max(1, ink) / speed
-        else:
-            # Include the fully drawn last frame; reveal is not a looping effect.
-            count = max(1, math.ceil((ink - 1) / speed) + 1)
-            if count > MAX_FRAMES:
-                raise RenderError("This reveal exceeds 720 frames. Increase motion speed or shorten the text before exporting animation.")
-            return Timeline(count, 1, FRAME_MS, False)
     else:
         raise RenderError(f"Animation {name!r} cannot be exported. Choose a supported motion or a still image.")
     count = max(2, math.ceil(period))

@@ -126,6 +126,9 @@ class Grid:
         self.palette: object | None = None
         # (char, x, y, width, height) for each letter, when the renderer recorded them.
         self.spans: tuple[tuple[str, int, int, int, int], ...] = ()
+        # Original letter ink, carried through decoration for parallel Trace.
+        # None means it has not been identified yet; () means no letter ink.
+        self.letter_ink: tuple[tuple[tuple[int, int], ...], ...] | None = None
 
     @classmethod
     def blank(cls, width: int, height: int) -> Grid:
@@ -166,6 +169,7 @@ class Grid:
         copied = Grid([[cell.clone() for cell in row] for row in self.rows])
         copied.palette = self.palette
         copied.spans = self.spans
+        copied.letter_ink = self.letter_ink
         return copied
 
     def __eq__(self, other: object) -> bool:

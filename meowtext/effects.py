@@ -7,6 +7,7 @@ letters. The shadow is a copy of the outlined letters, shifted.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from functools import lru_cache
 import math
 
 from meowtext.grid import Cell, Color, Grid, is_empty, is_ink
@@ -163,7 +164,7 @@ ANIMATIONS: tuple[tuple[str, str], ...] = (
 TRACE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("Around the outline", "outline"),
     ("Across the rows", "rows"),
-    ("One letter, then the next", "letter"),
+    ("Each letter together", "letter"),
     ("Out from the centre", "centre"),
 )
 
@@ -420,7 +421,9 @@ def apply_style(
     light_motion: Animation | None = None,
     frame: float = 0,
 ) -> Grid:
-    result = grid
+    result = grid.copy()
+    if result.letter_ink is None:
+        result.letter_ink = tuple(tuple(group) for group in _ink_groups(result))
     if style.recolour_roles or (style.stops and len(set(style.stops)) == 1):
         result = result.copy()
         for row in result.rows:
@@ -596,6 +599,12 @@ def _hstack(pieces: list[Grid]) -> Grid:
             else:
                 rows[y].extend(Cell() for _ in range(piece.width))
     grid = Grid(rows)
+    x = 0
+    letters = []
+    for piece in pieces:
+        letters.extend(tuple((px + x, py) for px, py in group) for group in _letters(piece))
+        x += piece.width
+    grid.letter_ink = tuple(letters)
     grid.normalize()
     return grid
 
@@ -610,6 +619,12 @@ def _vstack(pieces: list[Grid]) -> Grid:
                 padded.extend(Cell() for _ in range(width - len(padded)))
             rows.append(padded[:width] if width else [])
     grid = Grid(rows)
+    y = 0
+    letters = []
+    for piece in pieces:
+        letters.extend(tuple((px, py + y) for px, py in group) for group in _letters(piece))
+        y += piece.height
+    grid.letter_ink = tuple(letters)
     grid.normalize()
     return grid
 
@@ -649,6 +664,11 @@ def _outline_letters(
             [[source.get(x, y).clone() for x in range(x0, x1)] for y in range(y0, y1)]
         )
         crop.normalize()
+        crop.letter_ink = tuple(
+            clipped for group in _letters(source)
+            if (clipped := tuple((x - x0, y - y0) for x, y in group
+                                 if x0 <= x < x1 and y0 <= y < y1))
+        )
         piece = _outline_region(
             crop, char, colour, mode, stops, direction, phase, pulse,
             bands, sides, distance, place, shift_x, shift_y, readable,
@@ -721,6 +741,7 @@ def _outline_region(
     canvas_w = width + pad_left + pad_right
     canvas_h = height + pad_top + pad_bottom
     result = Grid.blank(canvas_w, canvas_h)
+    _move_letters(source, result, pad_left, pad_top)
 
     def ink_at(x: int, y: int) -> bool:
         return 0 <= x < width and 0 <= y < height and ink[y][x]
@@ -959,6 +980,7 @@ def drop_shadow(
     width = source.width + pad_left + max(0, dx)
     height = source.height + pad_top + max(0, dy)
     result = Grid.blank(width, height)
+    _move_letters(source, result, pad_left, pad_top)
     for y, row in enumerate(source.rows):
         for x, cell in enumerate(row):
             if not is_ink(cell):
@@ -1041,63 +1063,124 @@ def animation_phase(clock: float, travel: int) -> tuple[float, float]:
     return phase, hue
 
 
-def trace(grid: Grid, animation: Animation, frame: int) -> Grid:
-    """Reveal the banner along a path, or run a bright point along that path."""
+def _letters(grid: Grid) -> tuple[tuple[tuple[int, int], ...], ...]:
+    if grid.letter_ink is not None:
+        return grid.letter_ink
+    return tuple(tuple(group) for group in _ink_groups(grid))
 
-    order = _trace_order(grid, animation.pattern)
-    if not order:
+
+def _move_letters(source: Grid, target: Grid, dx: int, dy: int) -> None:
+    target.letter_ink = tuple(tuple((x + dx, y + dy) for x, y in group)
+                              for group in _letters(source))
+    target.spans = tuple((char, x + dx, y + dy, w, h)
+                         for char, x, y, w, h in source.spans)
+
+
+@dataclass(frozen=True)
+class TracePlan:
+    paths: tuple[tuple[tuple[int, int], ...], ...]
+    steps: int
+
+
+def trace_plan(grid: Grid, pattern: str = "outline") -> TracePlan:
+    """One path per letter, plus enough decoration seeds to keep pace.
+
+    Original ink is recorded before borders and shadows join neighbouring
+    letters. A long background is split into balanced paths, each no longer
+    than the largest letter. All paths start and finish on the same ticks.
+    """
+    ink = frozenset((x, y) for y, row in enumerate(grid.rows)
+                    for x, cell in enumerate(row) if is_ink(cell))
+    return _trace_plan(_letters(grid), ink, pattern)
+
+
+@lru_cache(maxsize=64)
+def _trace_plan(letters, ink, pattern) -> TracePlan:
+    used = set()
+    paths = []
+    for group in letters:
+        cells = set(group) & ink - used
+        if cells:
+            paths.append(_trace_path(cells, pattern))
+            used.update(cells)
+    steps = max((len(path) for path in paths), default=1)
+    background = _trace_path(ink - used, pattern)
+    if background:
+        seeds = math.ceil(len(background) / steps)
+        paths.extend(background[i * len(background) // seeds:
+                                (i + 1) * len(background) // seeds]
+                     for i in range(seeds))
+    return TracePlan(tuple(paths), steps)
+
+
+def trace(grid: Grid, animation: Animation, frame: float) -> Grid:
+    """Trace all letters and decoration in parallel on a common clock."""
+    plan = trace_plan(grid, animation.pattern)
+    if not plan.paths:
         return grid.copy()
-    clock = int(motion_clock(frame, animation))
+    clock = frame * (animation.speed if animation.speed > 0 else 1.0)
+    if animation.direction == "pingpong":
+        span = max(1, plan.steps - 1)
+        position = clock % (2 * span)
+        clock = min(position, 2 * span - position)
     if animation.reveal == "runner":
-        return _trace_runner(grid, order, clock)
+        if animation.direction == "backward":
+            clock = -clock
+        return _trace_runner(grid, plan, clock)
+    paths = plan.paths
     if animation.direction == "backward":
-        order = list(reversed(order))
-        clock = abs(clock)
-    return _trace_draw(grid, order, clock)
+        paths = tuple(tuple(reversed(path)) for path in paths)
+    progress = min(1.0, max(0.0, clock / max(1, plan.steps - 1)))
+    shown = set()
+    for path in paths:
+        count = 1 + math.floor(progress * (len(path) - 1) + 1e-9)
+        shown.update(path[:count])
+    out = grid.copy()
+    for y, row in enumerate(out.rows):
+        for x, cell in enumerate(row):
+            if is_ink(cell) and (x, y) not in shown:
+                row[x] = Cell()
+    return out
 
 
-def _trace_order(grid: Grid, pattern: str) -> list[tuple[int, int]]:
-    ink = [
-        (x, y)
-        for y, row in enumerate(grid.rows)
-        for x, cell in enumerate(row)
-        if is_ink(cell)
-    ]
-    if pattern == "rows":
-        return sorted(ink, key=lambda item: (item[1], item[0]))
+def _trace_path(cells, pattern: str) -> tuple[tuple[int, int], ...]:
+    if not cells:
+        return ()
+    ordered = sorted(cells, key=lambda item: (item[1], item[0]))
     if pattern == "centre":
-        cx = (grid.width - 1) / 2
-        cy = (grid.height - 1) / 2
-        return sorted(ink, key=lambda item: (abs(item[0] - cx) + abs(item[1] - cy), item[1], item[0]))
-    groups = _ink_groups(grid)
-    if pattern == "letter":
-        ordered: list[tuple[int, int]] = []
-        for group in groups:
-            ordered.extend(sorted(group, key=lambda item: (item[1], item[0])))
-        return ordered
-    ordered = []
-    for group in groups:
-        edge, inner = _perimeter(group)
-        ordered.extend(edge)
-        ordered.extend(sorted(inner, key=lambda item: (item[1], item[0])))
-    return ordered
+        cx = (min(x for x, y in cells) + max(x for x, y in cells)) / 2
+        cy = (min(y for x, y in cells) + max(y for x, y in cells)) / 2
+        return tuple(sorted(ordered, key=lambda item: abs(item[0] - cx) + abs(item[1] - cy)))
+    if pattern in {"rows", "letter"}:
+        return tuple(ordered)
+    edge, inner = _perimeter(ordered)
+    return tuple(edge + inner)
 
 
 def _ink_groups(grid: Grid) -> list[list[tuple[int, int]]]:
-    """Letters split by a blank column, each letter's ink cells together."""
-
-    height = grid.height
-    groups: list[list[tuple[int, int]]] = []
-    current: list[tuple[int, int]] = []
-    for x in range(grid.width):
-        column = [(x, y) for y in range(height) if is_ink(grid.get(x, y))]
-        if column:
-            current.extend(column)
-        elif current:
-            groups.append(current)
+    """Recorded glyphs, with blank row/column runs as an imported-art fallback."""
+    if grid.spans:
+        return [[(x, y) for y in range(max(0, sy), min(grid.height, sy + h))
+                 for x in range(max(0, sx), min(grid.width, sx + w))
+                 if is_ink(grid.get(x, y))]
+                for char, sx, sy, w, h in grid.spans]
+    groups = []
+    # Split lines first so aligned letters on different lines start together.
+    top = None
+    for bottom in range(grid.height + 1):
+        on = bottom < grid.height and any(is_ink(c) for c in grid.rows[bottom])
+        if on and top is None:
+            top = bottom
+        elif not on and top is not None:
             current = []
-    if current:
-        groups.append(current)
+            for x in range(grid.width + 1):
+                column = [(x, y) for y in range(top, bottom) if is_ink(grid.get(x, y))]
+                if column:
+                    current.extend(column)
+                elif current:
+                    groups.append(current)
+                    current = []
+            top = None
     return groups
 
 
@@ -1137,31 +1220,25 @@ def _perimeter(cells: list[tuple[int, int]]) -> tuple[list[tuple[int, int]], lis
     return walked + leftover, inner
 
 
-def _trace_draw(grid: Grid, order: list[tuple[int, int]], clock: int) -> Grid:
-    shown = set(order[: max(0, clock + 1)])
-    out = grid.copy()
-    for y, row in enumerate(out.rows):
-        for x, cell in enumerate(row):
-            if is_ink(cell) and (x, y) not in shown:
-                row[x] = Cell()
-    return out
-
-
-def _trace_runner(grid: Grid, order: list[tuple[int, int]], clock: int) -> Grid:
+def _trace_runner(grid: Grid, plan: TracePlan, clock: float) -> Grid:
     hot: dict[tuple[int, int], int] = {}
-    for age in range(4):
-        hot[order[(clock - age) % len(order)]] = age
+    for path in plan.paths:
+        head = math.floor(clock * len(path) / plan.steps + 1e-9)
+        for age in range(min(4, len(path))):
+            point = path[(head - age) % len(path)]
+            hot[point] = min(hot.get(point, age), age)
     out = grid.copy()
     for (x, y), age in hot.items():
         cell = out.get(x, y)
-        if cell.fg is None:
+        colour = cell.bg if cell.char in ("", " ") else cell.fg
+        if colour is None:
             continue
         gain = 1.8 - age * 0.25
         bright = cell.clone()
-        bright.fg = Color(
-            min(255, int(cell.fg.r * gain)),
-            min(255, int(cell.fg.g * gain)),
-            min(255, int(cell.fg.b * gain)),
-        )
+        tint = Color(*(min(255, int(c * gain)) for c in (colour.r, colour.g, colour.b)))
+        if cell.char in ("", " "):
+            bright.bg = tint
+        else:
+            bright.fg = tint
         out.set(x, y, bright)
     return out

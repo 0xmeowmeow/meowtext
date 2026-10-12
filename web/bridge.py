@@ -10,7 +10,7 @@ from meowtext.ansi import fit_width, parse_ansi
 from meowtext.catalog import FontInfo
 from meowtext.compose import layout_font, present
 from meowtext.discovery import Discovery, Specimen, describe
-from meowtext.effects import Animation, BannerStyle, PRESETS, OUTLINE_MODES, ANIMATIONS, PALETTES
+from meowtext.effects import Animation, BannerStyle, PRESETS, OUTLINE_MODES, ANIMATIONS, PALETTES, TRACE_PATTERNS
 from meowtext.errors import RenderError
 from meowtext.export import to_png, FORMAT_LABELS, export_notice
 from meowtext.animation_export import export_design
@@ -49,7 +49,7 @@ def configuration(items):
     discovery = Discovery(items)
     return {"project": json.loads(dumps_project(project)), "choices": choice_data(),
             "fonts": len(items), "looks": {k: _style_to(v) for k, v in PRESETS.items()},
-            "edges": OUTLINE_MODES, "motions": ANIMATIONS,
+            "edges": OUTLINE_MODES, "motions": ANIMATIONS, "tracePatterns": TRACE_PATTERNS,
             "palettes": list(PALETTES), "formats": FORMAT_LABELS,
             "notices": {fmt: [export_notice(fmt, False), export_notice(fmt, True)] for fmt in FORMAT_LABELS}}
 
@@ -62,7 +62,7 @@ def current_source():
     global source, source_key, palette
     key = (project.engine, project.font_name, project.font_source, project.font_index, project.text,
            json.dumps(json.loads(dumps_project(project))["letters"], sort_keys=True),
-           project.role_splits, project.style.outline_scope)
+           project.role_splits, project.style.outline_scope, project.animation.name == "trace")
     if source is None or key != source_key:
         font = None
         if project.engine == "tdf" and project.font_source:
@@ -73,7 +73,7 @@ def current_source():
             raise RenderError("This artwork is too large for the browser. Shorten the text or choose a smaller font.")
         if missing:
             raise RenderError("This font is missing: " + " ".join(missing))
-        if project.style.outline_scope == "letter" and not source.spans:
+        if (project.animation.name == "trace" or project.style.outline_scope == "letter") and not source.spans:
             source.spans = catalog.measure_spans(font, project.text)
         # Split roles on fresh source cells only; replaying splits changes IDs.
         palette = prepare_roles(source, project)

@@ -233,13 +233,13 @@ _SPAN_CACHE: OrderedDict[tuple[str, str], tuple[tuple[str, int, int, int, int], 
 
 
 def measure_spans(font: FontInfo, text: str) -> tuple[tuple[str, int, int, int, int], ...]:
-    """Where each letter sits. Used when an outline goes around each letter.
+    """Where each letter sits. Used for per-letter outlines and concurrent Trace.
 
     TheDraw already records this while rendering. FIGlet and TOIlet report
     it by measuring how the line grows, once per banner, and only when asked.
     """
 
-    if font.engine == "tdf" or len(text) > 40:
+    if font.engine == "tdf":
         return ()
     key = (font.id, text)
     cached = _SPAN_CACHE.get(key)
@@ -247,21 +247,23 @@ def measure_spans(font: FontInfo, text: str) -> tuple[tuple[str, int, int, int, 
         _SPAN_CACHE.move_to_end(key)
         return cached
     spans: list[tuple[str, int, int, int, int]] = []
-    y = 0
-    for line in text.split("\n"):
+    lines = text.split("\n")
+    for line_index, line in enumerate(lines):
         if line == "":
-            y += 1
             continue
+        line_grid = render(font, line).grid
+        # ANSI parsing trims outer blank rows. Measuring the whole prefix
+        # retains actual inter-line gaps, including explicitly empty lines.
+        prefix = render(font, "\n".join(lines[:line_index + 1])).grid if line_index else line_grid
+        y = prefix.height - line_grid.height
         previous = 0
-        height = 1
+        height = line_grid.height or 1
         for index, char in enumerate(line):
-            drawn = render(font, line[: index + 1])
-            width = drawn.grid.width
-            height = drawn.grid.height or 1
+            drawn = line_grid if index == len(line) - 1 else render(font, line[: index + 1]).grid
+            width = drawn.width
             start = min(previous, width)
             spans.append((char, start, y, max(1, width - start), height))
             previous = width
-        y += height
     stored = tuple(spans)
     _SPAN_CACHE[key] = stored
     while len(_SPAN_CACHE) > 64:

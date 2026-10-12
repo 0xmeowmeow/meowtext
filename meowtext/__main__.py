@@ -271,7 +271,7 @@ def _export_project(project, fmt, frame=0):
 
     font = library.project_font(project)
     source, _, _ = layout_font(project.text, font, project.letters or None)
-    if project.style.outline and project.style.outline_scope == "letter" and not source.spans:
+    if (project.animation.name == "trace" or (project.style.outline and project.style.outline_scope == "letter")) and not source.spans:
         source.spans = measure_spans(font, project.text)
     palette = library.prepare_roles(source, project)
     return export_design(source, project, fmt, frame, palette)

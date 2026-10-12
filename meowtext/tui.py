@@ -1272,7 +1272,7 @@ class MeowText(App):
                 key = (font.id, text, letter_sig)
                 if key != self._source_key:
                     source, missing, folded = layout_font(text, font, self._letters or None)
-                    if style.outline and style.outline_scope == "letter" and not source.spans:
+                    if (self._animation.name == "trace" or (style.outline and style.outline_scope == "letter")) and not source.spans:
                         source.spans = measure_spans(font, text)
                     self._source = source
                     self._source_missing = missing
@@ -1284,7 +1284,7 @@ class MeowText(App):
                     else:
                         self._relations.drop_splits()
                     self._role_sig = None
-                elif style.outline and style.outline_scope == "letter" and self._source is not None and not self._source.spans:
+                elif (self._animation.name == "trace" or (style.outline and style.outline_scope == "letter")) and self._source is not None and not self._source.spans:
                     self._source.spans = measure_spans(font, text)
                 assert self._source is not None
                 banner = Banner(

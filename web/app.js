@@ -187,7 +187,7 @@ function field(label, key, type = 'text', options, group = 'style') {
   const obj = group ? project[group] : project;
   const input = document.createElement(options ? 'select' : type === 'textarea' ? 'textarea' : 'input');
   input.setAttribute('aria-label',label);
-  if (options) for (const value of options) { const opt = document.createElement('option'); opt.value = value; opt.textContent = value === '' ? 'None / original' : value; input.append(opt); }
+  if (options) for (const item of options) { const [label,value] = Array.isArray(item) ? item : [item,item]; const opt = document.createElement('option'); opt.value = value; opt.textContent = value === '' ? 'None / original' : label; input.append(opt); }
   else if (type !== 'textarea') input.type = type;
   if (type === 'number') { input.step = 'any'; }
   if (type === 'checkbox') input.checked = !!obj[key];
@@ -247,9 +247,9 @@ function tune(kind) {
     field('Animation','name','text',config.motions.map(v => v[1]),'animation');
     field('Speed','speed','number',null,'animation'); field('Direction','direction','text',['forward','backward','pingpong'],'animation');
     field('Colour travel · 1–360°','travel','number',null,'animation'); field('Animated layers','layers','text',['all','roles','letters','outline'],'animation');
-    field('Trace path','pattern','text',['outline','rows','letter','centre'],'animation'); field('Trace mode','reveal','text',['draw','runner'],'animation');
+    field('Trace path','pattern','text',config.tracePatterns,'animation'); field('Trace mode','reveal','text',['draw','runner'],'animation');
     motionFields();
-    const p = document.createElement('p'); p.textContent = 'Shimmer sweeps light across the letters; Ripple sends it out from the centre; Breathe adds a slow glow; Colour wave rolls hues across the word. These four affect the letters. Draw reveals the whole artwork and holds; other motions repeat.'; $('tune-controls').append(p);
+    const p = document.createElement('p'); p.textContent = 'Shimmer sweeps light across the letters; Ripple sends it out from the centre; Breathe adds a slow glow; Colour wave rolls hues across the word. These four affect the letters. Trace starts every letter together, with enough border and shadow starting points to finish alongside them. Draw finishes and holds; ping-pong draws completely before reversing. Other motions repeat.'; $('tune-controls').append(p);
   } else {
     const p = document.createElement('p'); p.textContent = 'Choose a character and colour, close this panel, then click cells in the artwork. Painting pauses playback. Undo reverses each stroke.'; $('tune-controls').append(p);
     for (const [name,type,value,fn] of [['Character','text',paintChar,v=>paintChar=[...v][0]||' '],['Colour','color',paintColor,v=>paintColor=v]]) {

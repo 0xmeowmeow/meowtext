@@ -20,8 +20,8 @@ def frames(project):
     font = project_font(project)
     source, _, _ = layout_font(project.text, font, project.letters or None)
     if (
-        project.style.outline
-        and project.style.outline_scope == "letter"
+        (project.animation.name == "trace"
+         or (project.style.outline and project.style.outline_scope == "letter"))
         and not source.spans
     ):
         source.spans = measure_spans(font, project.text)

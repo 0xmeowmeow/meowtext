@@ -123,7 +123,7 @@ There are 40 preset looks, including Aurora, Synthwave, Lagoon, Candy, Copper, O
 - Solid colours, named palettes, custom gradient stops, hard bands and six gradient directions.
 - Shade, thick, contour, heavy, double and block outlines. Set width, sides, inside/outside placement, whole-word or per-letter scope, offsets, and a separate outline gradient and speed.
 - Drop shadows with their own offsets, colour and character.
-- Hue cycle, marching gradients, outline pulse, sparkle, scan and trace. Set speed, direction, colour travel and animated layers. Trace supports outline, rows, letters and centre paths, with draw-on or runner behaviour.
+- Hue cycle, marching gradients, outline pulse, sparkle, scan and trace. Set speed, direction, colour travel and animated layers. Trace starts every letter together and gives borders and shadows enough starting points to finish in the same time. Longer words and thicker borders do not slow the reveal. Outline, row and centre paths support draw-on or runner behaviour; ping-pong reaches the finished drawing before reversing. Preview and animated exports share the same timing.
 - Shimmer sweeps a bright highlight across the letters; Ripple sends highlights out from their centre; Breathe adds a slow glow; Colour wave rolls hues across the word. These four preserve letter geometry and leave shadows alone. Speed and direction apply to all of them.
 - TheDraw colour variants and linked or independent colour roles. Split separate sections into independent roles, focus a role in the preview, and edit named colours or HSV values.
 - Cell painting, individual letter edits, undo, and project notes. These change the design, not the font file.
